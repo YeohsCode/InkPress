@@ -184,13 +184,26 @@ def info_card(card, index):
     LH = 74          # line height ~1.7x
     PARA_GAP = 44
     max_chars = 22
+    # overflow guard: shrink body font until everything (incl. page number at H-130) fits
+    body_top = y
+    avail_bottom = H - 200   # keep clear of page number zone
+    for mc in range(22, 11, -1):
+        est = sum(len(wrap(card["points"][j], mc)) for j in range(len(card["points"])))
+        fs = int(44 * mc / 22)
+        lh = int(74 * fs / 44)
+        need = est * lh + (len(card["points"]) - 1) * 44
+        if body_top + need <= avail_bottom:
+            max_chars, f_body, LH = mc, _font(FONT_LIGHT, fs, LIGHT_IDX), lh
+            break
     for p in card["points"]:
         for ln in wrap(p, max_chars):
             d.text((200, y), ln, font=f_body, fill=INK)
             y += LH
         y += PARA_GAP
     if card.get("index_label"):
-        _center(d, card["index_label"], H - 130, _font(FONT_LIGHT, 38, LIGHT_IDX), GRAY)
+        # flowing page number: fixed at H-130 unless body reaches it, then below body
+        py = H - 130 if y + 60 < H - 130 else min(y + 10, H - 50)
+        _center(d, card["index_label"], py, _font(FONT_LIGHT, 38, LIGHT_IDX), GRAY)
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, f"info_{index:02d}.png")
     img.save(out)
