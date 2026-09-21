@@ -75,7 +75,7 @@ def wrap(text, max_chars):
             lines.append(line); line, width = "", 0.0; i += 1; continue
         # latin run -> whole word token
         if ch.isascii() and (ch.isalnum() or ch in "％$"):
-            m = re.match(r"[A-Za-z0-9]+[%＄$]?", text[i:])
+            m = re.match(r"[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*[%＄$]?", text[i:])
             token = m.group(0)
             tw = len(token) * 0.55
             if width + tw > max_chars and line:
