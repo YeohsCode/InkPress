@@ -76,6 +76,44 @@ def validate(report):
     # report.json 本身不渲染 ref；ref 存在 report['references']（正文推送用）
     if not report.get("references"):
         problems.append("[report] 缺 references 字段（正文结尾需带参考资料，图片不带）")
+    else:
+        # 每条 reference 必须带可访问的 http(s) link（用户 2026-09-24 指令）
+        for ri, ref in enumerate(report["references"]):
+            if not re.search(r"https?://", str(ref)):
+                problems.append(f"[references[{ri}]] 缺链接（参考资料必须带原文 URL）")
+
+    # 配图硬校验（用户 2026-09-23/24 指令）：至少 4 张 cards 配 card.image
+    cards = report.get("cards", [])
+    n_img = sum(1 for c in cards if c.get("image"))
+    if len(cards) >= 6 and n_img < 4:
+        problems.append(
+            f"[report] 配图不足：{len(cards)} 张 cards 只有 {n_img} 张配 card.image，要求至少 4 张"
+        )
+    for ci, c in enumerate(cards):
+        img = c.get("image")
+        if img and not (str(img).startswith("http") or os.path.exists(str(img))):
+            problems.append(f"[cards[{ci}].image] 配图 URL 无法确认/本地路径不存在: {img}")
+
+    # 标题数字一致性：标题里的中文/阿拉伯数字若指向"验证步骤/方法/动作"数量，
+    # 必须与正文能对上（用户 2026-09-24 抓包：标题写"三步"正文只有两步）
+    for ci, c in enumerate(cards):
+        title = c.get("title", "")
+        m = re.search(r"([一二三四五六七八九十\d]+)\s*(步|个动作|个方法|条建议|个验证)", title)
+        if m:
+            num_txt = m.group(1)
+            n = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+                 "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}.get(num_txt)
+            if n is None and num_txt.isdigit():
+                n = int(num_txt)
+            if n is not None:
+                body = " ".join(c.get("points", []))
+                # 数正文里"验证方法N / 动作N / 第N步"出现的不同编号
+                marks = set(re.findall(r"验证方法\s*([一二三四五六七八九十\d])|第\s*([一二三四五六七八九十\d])\s*步|动作\s*([一二三四五六七八九十\d])", body))
+                cnt = len({g for tup in marks for g in tup if g})
+                if cnt and cnt != n:
+                    problems.append(
+                        f"[cards[{ci}].title] 标题写「{num_txt}步/个」但正文只有 {cnt} 个编号动作，数量对不上"
+                    )
     return problems
 
 
