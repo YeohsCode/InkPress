@@ -106,7 +106,7 @@ function cardHTML(card, idx, total) {
   const totalChars = card.points.join('').length;
   const imgPenalty = card.image ? 0.72 : 1;
   const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
-  const bodyPx = Math.max(30, Math.round(42 * scale * 10) / 10);
+  const bodyPx = Math.max(27, Math.round(42 * scale * 10) / 10);
   const lh = 1.72;
   const img = card.image
     ? `<div class="imgbox" style="height:380px; margin-bottom:44px;"><img src="${esc(card.image)}"></div>`
@@ -136,11 +136,11 @@ function mergedFirstHTML(spec, card, idx, total) {
   }).join(' ');
   const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
   const totalChars = card.points.join('').length;
-  const imgPenalty = card.image ? 0.68 : 0.88;   // 顶部封面区占掉约 560px
+  const imgPenalty = card.image ? 0.50 : 0.80;   // 顶部封面区占掉约 560px
   const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
-  const bodyPx = Math.max(30, Math.round(42 * scale * 10) / 10);
+  const bodyPx = Math.max(27, Math.round(42 * scale * 10) / 10);
   const img = card.image
-    ? `<div class="imgbox" style="height:340px; margin-bottom:36px;"><img src="${esc(card.image)}"></div>`
+    ? `<div class="imgbox" style="height:260px; margin-bottom:28px;"><img src="${esc(card.image)}"></div>`
     : '';
   const chipCls = 'chip';
   return pageShell(`
