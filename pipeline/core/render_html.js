@@ -124,11 +124,45 @@ function cardHTML(card, idx, total) {
   <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
 }
 
+// 封面与第一页整合：第 1 页 = 封面大字区 + 第一卡正文，总计 9 页（2026-09-23 用户要求）
+function mergedFirstHTML(spec, card, idx, total) {
+  const acc = spec.accent_word || '';
+  const lines = spec.title_lines.map(l => {
+    if (acc && l.includes(acc)) {
+      const [pre, post] = l.split(acc);
+      return `<span>${esc(pre)}<span style="color:${ACCENT}">${esc(acc)}</span>${esc(post || '')}</span>`;
+    }
+    return `<span>${esc(l)}</span>`;
+  }).join(' ');
+  const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
+  const totalChars = card.points.join('').length;
+  const imgPenalty = card.image ? 0.68 : 0.88;   // 顶部封面区占掉约 560px
+  const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
+  const bodyPx = Math.max(30, Math.round(42 * scale * 10) / 10);
+  const img = card.image
+    ? `<div class="imgbox" style="height:340px; margin-bottom:36px;"><img src="${esc(card.image)}"></div>`
+    : '';
+  const chipCls = 'chip';
+  return pageShell(`
+  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+    <div class="kicker">${esc(spec.kicker || '')}</div>
+    <div style="height:34px"></div>
+    <div style="font-size:84px; font-weight:800; line-height:1.24; letter-spacing:2px;">${lines}</div>
+    <div class="rule" style="margin:36px 0 32px;"></div>
+    <div><span class="${chipCls}">${esc(card.tag || '01')}</span></div>
+    <div style="height:30px"></div>
+    ${img}
+    <div class="body" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.72;">${pts}</div>
+  </div>
+  <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">01 / ${String(total).padStart(2, '0')}</span></div>`);
+}
+
 (async () => {
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
   const page = await browser.newPage({ viewport: { width: 1242, height: 1656 }, deviceScaleFactor: 2 });
-  const shots = [['cover', coverHTML(report.cover)]];
-  report.cards.forEach((c, i) => shots.push([`info_${String(i + 1).padStart(2, '0')}`, cardHTML(c, i + 1, report.cards.length)]));
+  const rest = report.cards.slice(1);
+  const shots = [['cover', mergedFirstHTML(report.cover, report.cards[0], 1, report.cards.length)]];
+  rest.forEach((c, i) => shots.push([`info_${String(i + 2).padStart(2, '0')}`, cardHTML(c, i + 2, report.cards.length)]));
   for (const [name, html] of shots) {
     const tmp = path.join(OUT_DIR, `${name}.html`);
     fs.writeFileSync(tmp, html);
