@@ -24,13 +24,25 @@ const INK = THEME.ink || '#1A1A1A';
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // 关键数字/百分比/英文词上色：36%、$241.6、AI agent、Perplexity 等
+// 关键数字/百分比/英文词上色：36%、$241.6、AI agent、Perplexity 等
+// 单遍 tokenize：在原文上切 token 再包标签，杜绝"上一步注入的标签被下一步正则二次命中"
+// （2026-09-23 bug：串行 replace 把 <em class="num"> 里的 class/num 又包了层 <em>，
+//  标签撕碎后浏览器把残片 class="num"> 当纯文本渲染 —— 页 07 实锤）
 function richText(s) {
-  let out = esc(s);
-  out = out.replace(/(\$?\d[\d,.]*\s*(?:%|亿|万|美元|MW|GB|天|年|个月|倍|点|分))/g,
-    `<em class="num">$1</em>`);
-  out = out.replace(/([A-Za-z][A-Za-z0-9.\-]{2,}(?: [A-Za-z][A-Za-z0-9.\-]{2,})?)/g, (m, w, off, full) => {
-    return `<em class="en">${m}</em>`;
-  });
+  const NUM_RE = /\$?\d[\d,.]*\s*(?:%|亿|万|美元|MW|GB|天|年|个月|倍|点|分)/y;
+  const EN_RE = /[A-Za-z][A-Za-z0-9.\-]{2,}(?: [A-Za-z][A-Za-z0-9.\-]{2,})?/y;
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    NUM_RE.lastIndex = i;
+    let m = NUM_RE.exec(s);
+    if (m) { out += `<em class="num">${esc(m[0])}</em>`; i = NUM_RE.lastIndex; continue; }
+    EN_RE.lastIndex = i;
+    m = EN_RE.exec(s);
+    if (m) { out += `<em class="en">${esc(m[0])}</em>`; i = EN_RE.lastIndex; continue; }
+    out += esc(s[i]);
+    i += 1;
+  }
   return out;
 }
 
