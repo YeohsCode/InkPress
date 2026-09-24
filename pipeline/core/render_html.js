@@ -103,27 +103,86 @@ function coverHTML(spec) {
   <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${esc(report.date || '')}</span></div>`);
 }
 
+// ---- 布局选择（2026-09-24 用户要求打破"全部上图下文"）----
+// card.layout 显式指定优先（'hero' | 'side' | 'top' | 'below'）；否则按内容特征自动分配。
+// 自动规则（确定性，可复现）：
+//   无图                 -> text 纯文本
+//   points<=2 且 <=200字 -> hero  短文大图，图占上半屏
+//   <=300字              -> side  左文右图并排
+//   其余                 -> 交替 top / below（上图下文 / 上文下图）错开节奏
+function pickLayout(card, idx) {
+  if (card.layout) return card.layout;
+  if (!card.image) return 'text';
+  const chars = card.points.join('').length;
+  if (card.points.length <= 2 && chars <= 200) return 'hero';
+  if (chars <= 300) return 'side';
+  return (idx % 2 === 0) ? 'top' : 'below';
+}
+
 function cardHTML(card, idx, total) {
   const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
-  // 自适应缩字：按字符总量估字号（基准 42px / ~260 全角字符满页，配图占位时缩减）
   const totalChars = card.points.join('').length;
-  const imgPenalty = card.image ? 0.72 : 1;
-  const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
-  const bodyPx = Math.max(27, Math.round(42 * scale * 10) / 10);
-  const lh = 1.72;
-  const img = card.image
-    ? `<div class="imgbox" style="height:380px; margin-bottom:44px;"><img src="${esc(card.image)}"></div>`
-    : '';
+  const layout = pickLayout(card, idx);
   const chipCls = idx % 2 === 1 ? 'chip' : 'chip alt';
-  return pageShell(`
+  const chipHTML = `<div><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>`;
+  const bodyStyle = (fs) => `class="body fitbody" data-base="${fs}" style="flex:1; overflow:hidden; font-size:${fs}px; line-height:1.72;"`;
+  const est = (penalty) => {
+    const scale = Math.min(1, penalty * Math.sqrt(260 / totalChars));
+    return Math.max(27, Math.round(42 * scale * 10) / 10);
+  };
+  let inner = '';
+  if (layout === 'hero') {
+    const fs = est(0.42);
+    inner = `
+  <div style="position:absolute; left:0; right:0; top:0; height:820px; overflow:hidden;">
+    <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
+    <div style="position:absolute; inset:0; background:linear-gradient(180deg, rgba(20,16,12,0.06) 0%, rgba(20,16,12,0.62) 100%);"></div>
+    <div style="position:absolute; left:110px; bottom:40px; right:100px;"><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>
+  </div>
+  <div style="position:absolute; left:110px; right:100px; top:880px; bottom:140px; display:flex; flex-direction:column;">
+    <h1 class="title">${esc(card.title)}</h1>
+    <div class="rule"></div>
+    <div ${bodyStyle(fs)}>${pts}</div>
+  </div>`;
+  } else if (layout === 'side') {
+    const fs = est(0.82);
+    inner = `
   <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
-    <div><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>
+    ${chipHTML}
     <div style="height:40px"></div>
     <h1 class="title">${esc(card.title)}</h1>
     <div class="rule"></div>
-    ${img}
-    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:${lh};">${pts}</div>
-  </div>
+    <div style="flex:1; display:flex; gap:44px; margin-top:40px; min-height:0; align-items:stretch;">
+      <div class="body fitbody" data-base="${fs}" style="flex:1.6; min-width:0; overflow:hidden; font-size:${fs}px; line-height:1.72;">${pts}</div>
+      <div style="flex:1; min-width:0; border-radius:24px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.14);">
+        <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
+      </div>
+    </div>
+  </div>`;
+  } else if (layout === 'below') {
+    const fs = est(0.66);
+    inner = `
+  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+    ${chipHTML}
+    <div style="height:40px"></div>
+    <h1 class="title">${esc(card.title)}</h1>
+    <div class="rule"></div>
+    <div class="body fitbody" data-base="${fs}" style="flex:1; overflow:hidden; font-size:${fs}px; line-height:1.72; margin-top:36px;">${pts}</div>
+    <div class="imgbox" style="height:430px; margin-top:36px; flex:none;"><img src="${esc(card.image)}"></div>
+  </div>`;
+  } else {
+    const fs = est(0.72);
+    inner = `
+  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+    ${chipHTML}
+    <div style="height:40px"></div>
+    <h1 class="title">${esc(card.title)}</h1>
+    <div class="rule"></div>
+    <div class="imgbox" style="height:380px; margin-bottom:44px; margin-top:36px; flex:none;"><img src="${esc(card.image)}"></div>
+    <div ${bodyStyle(fs)}>${pts}</div>
+  </div>`;
+  }
+  return pageShell(inner + `
   <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
 }
 
