@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-/* HTML → PNG 卡片渲染器（2026-09-22 改版：布局/色彩分层 + 支持配图）。
- * 用法: node render_html.js [report.json]   默认 data/report.json
- * 输出: data/images/html/cover.png, info_NN.png
- * 图片不带参考资料 ref（ref 只进正文 report.references）。
- */
+/* HTML → PNG 渲染器（v4：内容驱动的编辑部版式）。 */
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require(path.join('/Users/andrewyeoh/Werk/HermesAgent/code/node_modules/playwright'));
@@ -17,221 +13,417 @@ const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
 const THEME = report.theme || {};
 const ACCENT = THEME.accent || '#C8442A';
 const ACCENT2 = THEME.accent2 || '#1F5F7A';
-const BG1 = THEME.bg1 || '#FAF7F2';
-const BG2 = THEME.bg2 || '#F2ECE3';
-const INK = THEME.ink || '#1A1A1A';
+const INK = THEME.ink || '#16130F';
 
-const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// 关键数字/百分比/英文词上色：36%、$241.6、AI agent、Perplexity 等
-// 关键数字/百分比/英文词上色：36%、$241.6、AI agent、Perplexity 等
-// 单遍 tokenize：在原文上切 token 再包标签，杜绝"上一步注入的标签被下一步正则二次命中"
-// （2026-09-23 bug：串行 replace 把 <em class="num"> 里的 class/num 又包了层 <em>，
-//  标签撕碎后浏览器把残片 class="num"> 当纯文本渲染 —— 页 07 实锤）
-function richText(s) {
+// 单遍 tokenize：先按原文边界命中，再包标签，避免串行 replace 二次命中注入标签。
+function richText(value) {
   const NUM_RE = /\$?\d[\d,.]*\s*(?:%|亿|万|美元|MW|GB|天|年|个月|倍|点|分)/y;
-  const EN_RE = /[A-Za-z][A-Za-z0-9.\-]{2,}(?: [A-Za-z][A-Za-z0-9.\-]{2,})?/y;
-  let out = '';
-  let i = 0;
-  while (i < s.length) {
-    NUM_RE.lastIndex = i;
-    let m = NUM_RE.exec(s);
-    if (m) { out += `<em class="num">${esc(m[0])}</em>`; i = NUM_RE.lastIndex; continue; }
-    EN_RE.lastIndex = i;
-    m = EN_RE.exec(s);
-    if (m) { out += `<em class="en">${esc(m[0])}</em>`; i = EN_RE.lastIndex; continue; }
-    out += esc(s[i]);
-    i += 1;
+  const EN_RE = /[A-Za-z][A-Za-z0-9.\-/]{2,}(?: [A-Za-z][A-Za-z0-9.\-/]{2,})?/y;
+  let output = '';
+  let cursor = 0;
+  while (cursor < value.length) {
+    NUM_RE.lastIndex = cursor;
+    let match = NUM_RE.exec(value);
+    if (match) {
+      output += `<em class="num">${esc(match[0])}</em>`;
+      cursor = NUM_RE.lastIndex;
+      continue;
+    }
+    EN_RE.lastIndex = cursor;
+    match = EN_RE.exec(value);
+    if (match) {
+      output += `<em class="en">${esc(match[0])}</em>`;
+      cursor = EN_RE.lastIndex;
+      continue;
+    }
+    output += esc(value[cursor]);
+    cursor += 1;
   }
-  return out;
+  return output;
 }
 
-function pageShell(inner, opts = {}) {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-  /* ====== 设计系统 v3（2026-09-24 重做）：Apple News / iOS Dynamic Type 语系 ======
-     依据：NN/g legibility（大默认字号+高对比+素背景）、Baymard 50-75 字符行宽、
-     Refactoring UI（灰阶分层+单一强调色克制使用）、Apple HIG type ladder 比例 */
+function firstSentence(text) {
+  const sentence = text.match(/^[\s\S]{0,125}?[。！？；：]/);
+  if (sentence) return sentence[0];
+  const comma = text.slice(32).search(/[，,]/);
+  if (comma >= 0) return text.slice(0, 33 + comma);
+  return text;
+}
+
+function splitLede(text) {
+  const lede = firstSentence(text).trim();
+  return [lede, text.slice(lede.length).trim()];
+}
+
+function ledeBody(points) {
+  const [lede, remainder] = splitLede(points[0]);
+  const paragraphs = [];
+  if (remainder) paragraphs.push(remainder);
+  paragraphs.push(...points.slice(1));
+  return {
+    lede: richText(lede),
+    body: paragraphs.map(item => `<p>${richText(item)}</p>`).join('')
+  };
+}
+
+function selectedStats(card, index) {
+  const text = card.points.join('\n');
+  const grab = (pattern, label, suffix = '') => {
+    const match = text.match(pattern);
+    return match ? { value: match[1] + suffix, label } : null;
+  };
+  const candidates = [
+    grab(/核心数字是\s*(\d+(?:\.\d+)?)\s*毫秒/, '端到端延迟', ' ms'),
+    grab(/P50\s*(\d+(?:\.\d+)?)\s*毫秒/, '端到端 P50', ' ms'),
+    ...[...text.matchAll(/(\d+(?:\.\d+)?)\s*题\/秒/g)].map(match => ({ value: match[1], label: '题 / 秒' })),
+    grab(/多语言版\s*(\d+(?:\.\d+)?)\s*毫秒/, '多语言 P50', ' ms'),
+    grab(/(\d+)\s*个\s*star/i, 'GitHub Stars'),
+    grab(/(\d+)\s*星/, 'GitHub Stars'),
+    grab(/(\d+)\s*个\s*fork/i, 'GitHub Forks'),
+    grab(/(\d+\s*\/\s*\d+)/, '逐题对照'),
+    grab(/重复调用\s*(\d+)\s*次/, '稳定性轮次', ' 次'),
+    grab(/(\d+)\s*个文件/, '发布文件', ' 个'),
+    grab(/拿了\s*(\d+)\s*分/, 'HN 得分'),
+    grab(/(\d+)\s*条评论/, '条评论'),
+    grab(/(\d+(?:\.\d+)?)\s*道题/, '基准题', ' 道'),
+    grab(/(\d+)M 参数/, '英文版参数', 'M'),
+    ...[...text.matchAll(/上下文\s*(\d+)/g)].map(match => ({ value: match[1], label: '上下文' }))
+  ].filter(Boolean);
+  const seen = new Set();
+  const unique = candidates.filter(item => {
+    const key = item.value + item.label;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (index === 8) return unique.filter(item => /参数|上下文/.test(item.label)).slice(0, 4);
+  return unique.slice(0, index === 3 ? 4 : 3);
+}
+
+function statBlocks(stats, columns) {
+  if (!stats.length) return '';
+  return `<div class="statrow cols-${columns}">${stats.map((stat, position) => `
+    <div class="stat ${position % 2 === 1 ? 'alt' : ''}">
+      <span class="statvalue">${esc(stat.value)}</span>
+      <span class="statlabel">${esc(stat.label)}</span>
+    </div>`).join('')}</div>`;
+}
+
+function imageHTML(card, className = '') {
+  if (!card.image) return '';
+  return `<div class="image ${className}"><img src="${esc(card.image)}" alt=""></div>`;
+}
+
+function numberedRows(points) {
+  return points.map((point, index) => `
+    <article class="numberrow">
+      <span class="number">${String(index + 1).padStart(2, '0')}</span>
+      <div class="numberbody">${richText(point)}</div>
+    </article>`).join('');
+}
+
+function pageShell(inner, index, total, layout) {
+  const pageNo = String(index).padStart(2, '0');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { -webkit-font-smoothing:antialiased; }
-  body { width:1242px; height:1656px; font-family:"PingFang SC","Helvetica Neue",sans-serif;
-         background:#F7F5F2; color:#111111; position:relative; overflow:hidden; }
-  /* 素背景：去掉渐变+装饰圆，改为纸感单色 + 头部强调色细线 */
-  .topline { position:absolute; top:0; left:0; right:0; height:14px; background:${ACCENT}; }
-  .topmeta { position:absolute; top:52px; left:96px; right:96px; display:flex; justify-content:space-between;
-             font-size:26px; letter-spacing:5px; color:#8A8580; font-weight:500; }
-  .kicker { font-size:28px; color:#8A8580; letter-spacing:6px; font-weight:500; }
-  .chip { display:inline-block; padding:10px 28px; border-radius:12px; color:#fff;
-          font-size:30px; font-weight:600; letter-spacing:3px; background:${ACCENT}; }
-  .chip.alt { background:${ACCENT2}; }
-  /* type ladder（对齐 iOS Dynamic Type 比例）：title 72 / body 34-40 / caption 26。
-     行宽控制 50-75 字符（Baymard）：左右留白 96px。 */
-  h1.title { font-size:72px; font-weight:800; line-height:1.22; letter-spacing:0.5px; }
-  .body { font-weight:400; color:#2A2A2A; }
-  .body p { margin-bottom:30px; text-align:left; }
-  .body p:last-child { margin-bottom:0; }
+  html,body { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body { width:1242px; height:1656px; overflow:hidden; position:relative; color:${INK};
+    background:#F7F4EF; font-family:"PingFang SC","Helvetica Neue",sans-serif; }
+  .topline { position:absolute; top:0; left:0; right:0; height:10px; background:${ACCENT}; z-index:5; }
+  .masthead { position:absolute; top:46px; left:96px; right:96px; z-index:4; display:flex;
+    align-items:center; justify-content:space-between; font-size:25px; font-weight:550;
+    letter-spacing:5px; color:#756F67; }
+  .masthead .brand::before { content:""; width:14px; height:14px; margin-right:14px;
+    display:inline-block; background:${ACCENT}; transform:translateY(1px); }
+  .page { position:absolute; left:96px; right:96px; top:126px; bottom:132px; z-index:2; }
+  .kicker { display:inline-flex; gap:14px; align-items:center; font-size:25px; font-weight:600;
+    letter-spacing:4px; color:#756F67; }
+  .kicker::before { content:""; width:34px; height:3px; background:${ACCENT}; }
+  h1.title { font-family:"Songti SC","Noto Serif CJK SC",serif; font-weight:800; line-height:1.15;
+    letter-spacing:.5px; font-size:72px; color:#171310; }
+  .lede { font-family:"Songti SC","Noto Serif CJK SC",serif; color:#242019; font-weight:650; line-height:1.35; }
+  .body { color:#38332C; line-height:1.70; }
+  .body p + p { margin-top:24px; }
   em.num { font-style:normal; color:${ACCENT}; font-weight:700; }
-  em.en { font-style:normal; color:${ACCENT2}; font-weight:600; font-size:0.9em; }
-  .imgbox { border-radius:0; overflow:hidden; box-shadow:none; }
-  .imgbox img { width:100%; height:100%; object-fit:cover; display:block; }
-  .rule { width:72px; height:8px; background:${ACCENT}; margin:28px 0; }
-  .footer { position:absolute; bottom:44px; left:96px; right:96px; display:flex;
-            justify-content:space-between; align-items:center; font-size:26px; color:#A29B93;
-            border-top:2px solid #E5E0DA; padding-top:20px; }
-  .pgnum { font-variant-numeric:tabular-nums; letter-spacing:2px; }
-  </style></head><body>
+  em.en { font-style:normal; color:${ACCENT2}; font-weight:600; font-size:.9em; }
+  .image { overflow:hidden; background:#E4DFD7; }
+  .image img { width:100%; height:100%; object-fit:cover; display:block; }
+  .statrow { display:grid; gap:20px; }
+  .statrow.cols-3 { grid-template-columns:repeat(3,1fr); }
+  .statrow.cols-4 { grid-template-columns:repeat(4,1fr); }
+  .statrow.cols-4 .statvalue { font-size:33px; }
+  .stat { padding:26px 22px 22px; background:#FFF; border-top:4px solid ${ACCENT};
+    box-shadow:0 14px 34px rgba(60,48,37,.07); min-width:0; }
+  .stat.alt { border-top-color:${ACCENT2}; }
+  .statvalue { display:block; font-family:"Avenir Next","PingFang SC",sans-serif; font-size:42px;
+    line-height:1.05; font-weight:750; color:${ACCENT}; white-space:nowrap; }
+  .stat.alt .statvalue { color:${ACCENT2}; }
+  .statlabel { display:block; margin-top:10px; font-size:22px; line-height:1.25; color:#6A645B;
+    font-weight:550; letter-spacing:1px; }
+  .numbered { display:flex; flex-direction:column; justify-content:flex-start; }
+  .numberrow { display:flex; gap:24px; min-height:0; }
+  .number { flex:none; width:82px; font-family:"Avenir Next",sans-serif; font-size:50px; line-height:1;
+    font-weight:750; color:${ACCENT}; opacity:.82; }
+  .numberbody { min-width:0; color:#38332C; font-size:30px; line-height:1.62; }
+  .footer { position:absolute; left:96px; right:96px; bottom:42px; z-index:4; display:flex;
+    justify-content:space-between; align-items:center; border-top:1px solid #DAD3C8; padding-top:16px;
+    font-size:23px; font-weight:500; letter-spacing:2px; color:#8A8378; }
+  .pageno { font-variant-numeric:tabular-nums; color:${ACCENT}; font-weight:700; }
+  .fitbody { overflow:hidden; min-height:0; }
+  main.layout-front { display:grid; grid-template-columns:1.24fr .76fr; gap:46px; }
+  .layout-front .leadcolumn { display:flex; flex-direction:column; min-width:0; }
+  figure.layout-hero.stage { position:absolute; top:0; left:0; right:0; height:630px; }
+  figure.layout-hero.stage .image { height:100%; }
+  main.layout-hero.copy { position:absolute; left:96px; right:96px; top:690px; bottom:132px;
+    display:flex; flex-direction:column; }
+  main.layout-stat.copy { display:flex; flex-direction:column; }
+  .layout-stat .lower { flex:1; display:grid; grid-template-columns:1.72fr 1fr; gap:42px; margin-top:44px; min-height:0; }
+  main.layout-verify.copy { display:flex; flex-direction:column; }
+  .layout-verify .lower { flex:1; display:grid; grid-template-columns:1.08fr .92fr; gap:40px; margin-top:42px; min-height:0; }
+  main.layout-quote.copy { display:flex; flex-direction:column; z-index:2; }
+  .layout-quote .bigquote { font-size:50px; line-height:1.32; padding:0 0 32px;
+    border-bottom:1px solid #D9D2C6; margin-bottom:30px; }
+  .layout-quote .columns { flex:1; column-count:2; column-gap:46px; }
+  .layout-quote .columns p { break-inside:avoid-column; }
+  .layout-index { display:grid; grid-template-columns:.84fr 1.16fr; }
+  .layout-index .left { display:flex; flex-direction:column; padding-right:40px; min-width:0; }
+  .layout-index .right { display:flex; flex-direction:column; min-width:0; padding-top:72px; }
+  main.layout-weave { display:grid; grid-template-columns:.82fr 1.18fr; gap:40px; }
+  .layout-weave .visual { display:flex; flex-direction:column; min-width:0; }
+  main.layout-steps.copy { display:flex; flex-direction:column; }
+  .layout-steps .lower { flex:1; display:grid; grid-template-columns:1.26fr .74fr; gap:40px; margin-top:40px; min-height:0; }
+  main.layout-endpoint.copy { display:flex; flex-direction:column; }
+  .layout-endpoint .timeline { flex:1; margin-top:46px; }
+  .layout-endpoint .numberrow + .numberrow { margin-top:44px; }
+  .layout-endpoint .numberrow + .numberrow { margin-top:30px; border-top:1px solid #DDD6CA; padding-top:28px; }
+  </style></head><body data-layout="${esc(layout)}">
   <div class="topline"></div>
+  <div class="masthead"><span class="brand">${esc(report.series || 'AI 圈每日深读')}</span><span>${esc(report.cover.kicker || '')}</span></div>
   ${inner}
+  <div class="footer"><span>${esc(report.series || 'AI 圈每日深读')}</span><span class="pageno">${pageNo} / ${String(total).padStart(2, '0')}</span></div>
   </body></html>`;
 }
 
-// ---- 布局选择（2026-09-24 用户要求打破"全部上图下文"）----
-// card.layout 显式指定优先（'hero' | 'side' | 'top' | 'below'）；否则按内容特征自动分配。
-// 自动规则（确定性，可复现）：
-//   无图                 -> text 纯文本
-//   points<=2 且 <=200字 -> hero  短文大图，图占上半屏
-//   <=300字              -> side  左文右图并排
-//   其余                 -> 交替 top / below（上图下文 / 上文下图）错开节奏
-function pickLayout(card, idx) {
-  if (card.layout) return card.layout;
-  if (!card.image) return 'text';
-  const chars = card.points.join('').length;
-  if (card.points.length <= 2 && chars <= 200) return 'hero';
-  if (chars <= 300) return 'side';
-  return (idx % 2 === 0) ? 'top' : 'below';
-}
-
-function cardHTML(card, idx, total) {
-  const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
-  const totalChars = card.points.join('').length;
-  const layout = pickLayout(card, idx);
-  const chipCls = idx % 2 === 1 ? 'chip' : 'chip alt';
-  const chipHTML = `<div><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>`;
-  const bodyStyle = (fs) => `class="body fitbody" data-base="${fs}" style="flex:1; overflow:hidden; font-size:${fs}px; line-height:1.72;"`;
-  const est = (penalty) => {
-    const scale = Math.min(1, penalty * Math.sqrt(260 / totalChars));
-    return Math.max(27, Math.round(42 * scale * 10) / 10);
-  };
-  let inner = '';
-  if (layout === 'hero') {
-    const fs = est(0.42);
-    inner = `
-  <div style="position:absolute; left:0; right:0; top:0; height:820px; overflow:hidden;">
-    <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
-    <div style="position:absolute; inset:0; background:linear-gradient(180deg, rgba(20,16,12,0.06) 0%, rgba(20,16,12,0.62) 100%);"></div>
-    <div style="position:absolute; left:96px; bottom:40px; right:96px;"><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>
-  </div>
-  <div style="position:absolute; left:96px; right:96px; top:880px; bottom:124px; display:flex; flex-direction:column;">
-    <h1 class="title">${esc(card.title)}</h1>
-    <div class="rule"></div>
-    <div ${bodyStyle(fs)}>${pts}</div>
-  </div>`;
-  } else if (layout === 'side') {
-    const fs = est(0.82);
-    inner = `
-  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
-    ${chipHTML}
-    <div style="height:40px"></div>
-    <h1 class="title">${esc(card.title)}</h1>
-    <div class="rule"></div>
-    <div style="flex:1; display:flex; gap:44px; margin-top:40px; min-height:0; align-items:stretch;">
-      <div class="body fitbody" data-base="${fs}" style="flex:1.6; min-width:0; overflow:hidden; font-size:${fs}px; line-height:1.72;">${pts}</div>
-      <div style="flex:1; min-width:0; overflow:hidden;">
-        <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
-      </div>
-    </div>
-  </div>`;
-  } else if (layout === 'below') {
-    const fs = est(0.66);
-    inner = `
-  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
-    ${chipHTML}
-    <div style="height:40px"></div>
-    <h1 class="title">${esc(card.title)}</h1>
-    <div class="rule"></div>
-    <div class="body fitbody" data-base="${fs}" style="flex:1; overflow:hidden; font-size:${fs}px; line-height:1.72; margin-top:36px;">${pts}</div>
-    <div class="imgbox" style="height:430px; margin-top:36px; flex:none;"><img src="${esc(card.image)}"></div>
-  </div>`;
-  } else {
-    const fs = est(0.72);
-    inner = `
-  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
-    ${chipHTML}
-    <div style="height:40px"></div>
-    <h1 class="title">${esc(card.title)}</h1>
-    <div class="rule"></div>
-    <div class="imgbox" style="height:380px; margin-bottom:44px; margin-top:36px; flex:none;"><img src="${esc(card.image)}"></div>
-    <div ${bodyStyle(fs)}>${pts}</div>
-  </div>`;
-  }
-  return pageShell(inner + `
-  <div class="footer"><span>${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
-}
-
-// 封面与第一页整合：第 1 页 = 封面大字区 + 第一卡正文，总计 9 页（2026-09-23 用户要求）
-function mergedFirstHTML(spec, card, idx, total) {
-  const acc = spec.accent_word || '';
-  const lines = spec.title_lines.map(l => {
-    if (acc && l.includes(acc)) {
-      const [pre, post] = l.split(acc);
-      return `<span>${esc(pre)}<span style="color:${ACCENT}">${esc(acc)}</span>${esc(post || '')}</span>`;
-    }
-    return `<span>${esc(l)}</span>`;
-  }).join(' ');
-  const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
-  const totalChars = card.points.join('').length;
-  const imgPenalty = card.image ? 0.50 : 0.80;
-  const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
-  const bodyPx = Math.max(27, Math.round(42 * scale * 10) / 10);
-  const img = card.image
-    ? `<div class="imgbox" style="height:240px; margin-bottom:26px; flex:none;"><img src="${esc(card.image)}"></div>`
-    : '';
+function coverFirstHTML(card, index, total) {
+  const spec = report.cover;
+  const accent = spec.accent_word || '';
+  const titleLines = spec.title_lines.map(line => {
+    if (!accent || !line.includes(accent)) return `<span>${esc(line)}</span>`;
+    const [before, after] = line.split(accent);
+    return `<span>${esc(before)}<span style="color:${ACCENT}">${esc(accent)}</span>${esc(after || '')}</span>`;
+  }).join('');
+  const { lede, body } = ledeBody(card.points);
+  const stats = selectedStats(card, index);
+  const bodySize = 31;
   return pageShell(`
-  <div class="topmeta"><span>${esc(spec.series || 'AI 圈每日深读')}</span><span>${esc(spec.kicker || '')}</span></div>
-  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
-    <div style="font-size:92px; font-weight:800; line-height:1.18; letter-spacing:1px;">${lines}</div>
-    <div class="rule" style="margin:32px 0;"></div>
-    <div><span class="chip">${esc(card.tag || '01')}</span></div>
-    <div style="height:28px"></div>
-    ${img}
-    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.66;">${pts}</div>
-  </div>
-  <div class="footer"><span>${esc(spec.series || 'AI 圈每日深读')}</span><span class="pgnum">01 / ${String(total).padStart(2, '0')}</span></div>`);
+  <main class="page layout-front">
+    <section class="leadcolumn">
+      <div class="kicker">TODAY · 9月24日</div>
+      <h1 class="title" style="font-size:90px; margin:28px 0 0;">${titleLines}</h1>
+      <div style="width:92px;height:8px;background:${ACCENT};margin:34px 0;"></div>
+      <div class="lede" style="font-size:35px; margin-bottom:28px;">${lede}</div>
+      <div class="body fitbody" data-base="${bodySize}" style="flex:1; font-size:${bodySize}px;">${body}</div>
+    </section>
+    <section style="display:flex;flex-direction:column;min-width:0;">
+      ${statBlocks(stats, 3)}
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;margin-top:24px;"')}
+    </section>
+  </main>`, index, total, 'front');
+}
+
+function heroHTML(card, index, total) {
+  const { lede, body } = ledeBody(card.points);
+  const bodySize = 32;
+  return pageShell(`
+  <figure class="layout-hero stage">${imageHTML(card)}</figure>
+  <main class="layout-hero copy">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="margin:24px 0 26px;">${esc(card.title)}</h1>
+    <div class="lede" style="font-size:38px; margin-bottom:28px;">${lede}</div>
+    <div class="body fitbody" data-base="${bodySize}" style="flex:1; font-size:${bodySize}px;">${body}</div>
+  </main>`, index, total, 'hero');
+}
+
+function statHTML(card, index, total) {
+  const { lede, body } = ledeBody(card.points);
+  const stats = selectedStats(card, index);
+  const bodySize = 29;
+  return pageShell(`
+  <main class="page layout-stat copy">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="margin:24px 0 32px;">${esc(card.title)}</h1>
+    ${statBlocks(stats, 4)}
+    <section class="lower">
+      <div class="body fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
+      <aside style="display:flex;flex-direction:column;min-width:0;">
+        <div class="lede" style="font-size:32px;margin-bottom:24px;">${lede}</div>
+        ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;"')}
+      </aside>
+    </section>
+  </main>`, index, total, 'stat');
+}
+
+function verifyHTML(card, index, total) {
+  const { lede, body } = ledeBody(card.points);
+  const stats = selectedStats(card, index);
+  const bodySize = 29;
+  return pageShell(`
+  <main class="page layout-verify copy">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="margin:24px 0 28px;">${esc(card.title)}</h1>
+    <div class="lede" style="font-size:35px;">${lede}</div>
+    ${statBlocks(stats, 3)}
+    <section class="lower">
+      <div class="body fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="height:100%;"')}
+    </section>
+  </main>`, index, total, 'verify');
+}
+
+function quoteHTML(card, index, total) {
+  const { lede, body } = ledeBody(card.points);
+  const bodySize = 28;
+  return pageShell(`
+  <main class="page layout-quote copy">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="margin:22px 0 30px;">${esc(card.title)}</h1>
+    <blockquote class="lede bigquote">${lede}</blockquote>
+    <div class="body columns fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
+  </main>`, index, total, 'quote').replace('<div class="topline"></div>',
+    `<figure class="image" style="position:absolute;left:0;right:0;bottom:104px;height:430px;z-index:1;">${imageHTML(card)}</figure><div class="topline"></div>`);
+}
+
+function indexHTML(card, index, total) {
+  const { lede } = ledeBody(card.points);
+  const bodySize = 27;
+  return pageShell(`
+  <main class="page layout-index">
+    <section class="left">
+      <div class="kicker">${esc(card.tag || '')}</div>
+      <h1 class="title" style="font-size:66px;margin:26px 0 30px;">${esc(card.title)}</h1>
+      <div class="lede fitbody" data-base="${bodySize + 7}" style="font-size:${bodySize + 7}px;line-height:1.45;">${lede}</div>
+      <div style="flex:1;"></div>
+    </section>
+    <section class="right">
+      <div class="numbered fitbody" data-base="${bodySize}" style="flex:1;font-size:${bodySize}px;">${numberedRows(card.points)}</div>
+      ${imageHTML(card).replace('class="image"', 'class="image" style="height:330px;margin:34px -96px 0;"')}
+    </section>
+  </main>`, index, total, 'index');
+}
+
+function weaveHTML(card, index, total) {
+  const { lede } = ledeBody(card.points);
+  const bodySize = 30;
+  return pageShell(`
+  <main class="page layout-weave copy">
+    <section style="display:flex;flex-direction:column;min-width:0;">
+      <div class="kicker">${esc(card.tag || '')}</div>
+      <h1 class="title" style="font-size:66px;margin:24px 0 28px;">${esc(card.title)}</h1>
+      <div class="lede" style="font-size:34px;margin-bottom:28px;">${lede}</div>
+      <div class="body fitbody" data-base="${bodySize}" style="flex:1;font-size:${bodySize}px;">${richText(card.points[1] || '')}</div>
+    </section>
+    <section class="visual">
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="height:59%;"')}
+      <div style="flex:1;background:#FFF;border-top:5px solid ${ACCENT2};padding:34px 32px;box-shadow:0 16px 36px rgba(60,48,37,.08);">
+        <div style="font-size:23px;letter-spacing:3px;color:${ACCENT2};font-weight:700;">LOCAL-FIRST</div>
+        <div style="width:44px;height:3px;background:${ACCENT2};margin:18px 0 22px;"></div>
+        <div class="body" style="font-size:26px;line-height:1.58;">${richText(card.points[2] || '')}</div>
+      </div>
+    </section>
+  </main>`, index, total, 'weave');
+}
+
+function stepsHTML(card, index, total) {
+  const stats = selectedStats(card, index);
+  const bodySize = 26;
+  return pageShell(`
+  <main class="page layout-steps copy">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="margin:24px 0 26px;">${esc(card.title)}</h1>
+    ${statBlocks(stats, 3)}
+    <section class="lower">
+      <div class="numbered fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${numberedRows(card.points)}</div>
+      <aside style="display:flex;flex-direction:column;min-width:0;">
+        ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;"')}
+      </aside>
+    </section>
+  </main>`, index, total, 'steps');
+}
+
+function endpointHTML(card, index, total) {
+  const { lede } = ledeBody(card.points);
+  const stats = selectedStats(card, index);
+  const bodySize = 29;
+  return pageShell(`
+  <main class="page layout-endpoint copy">
+    <div class="kicker">${esc(card.tag || '')} · TIMELINE</div>
+    <h1 class="title" style="font-size:82px;margin:30px 0 28px;">${esc(card.title)}</h1>
+    <div class="lede" style="font-size:38px;">${lede}</div>
+    ${statBlocks(stats, 3)}
+    <div class="numbered timeline fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${numberedRows(card.points)}</div>
+  </main>`, index, total, 'endpoint');
+}
+
+function cardHTML(card, index, total) {
+  const layouts = [heroHTML, statHTML, verifyHTML, quoteHTML, indexHTML, weaveHTML, stepsHTML, endpointHTML];
+  return layouts[index - 2](card, index, total);
 }
 
 (async () => {
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
   const page = await browser.newPage({ viewport: { width: 1242, height: 1656 }, deviceScaleFactor: 2 });
-  const rest = report.cards.slice(1);
-  const shots = [['cover', mergedFirstHTML(report.cover, report.cards[0], 1, report.cards.length)]];
-  rest.forEach((c, i) => shots.push([`info_${String(i + 2).padStart(2, '0')}`, cardHTML(c, i + 2, report.cards.length)]));
+  const shots = [['cover', coverFirstHTML(report.cards[0], 1, report.cards.length)]];
+  report.cards.slice(1).forEach((card, offset) => {
+    const index = offset + 2;
+    shots.push([`info_${String(index).padStart(2, '0')}`, cardHTML(card, index, report.cards.length)]);
+  });
+
+  const failures = [];
   for (const [name, html] of shots) {
-    const tmp = path.join(OUT_DIR, `${name}.html`);
-    fs.writeFileSync(tmp, html);
-    await page.goto('file://' + tmp, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(120);
-    // measured auto-fit: heuristic mis-estimates pages with many English <em>; measure real
-    // scroll overflow and shrink until it fits (floor 20px, max 8 passes)
-    for (let fit = 0; fit < 8; fit++) {
-      const ov = await page.evaluate(() => {
-        const b = document.querySelector('.fitbody');
-        if (!b) return 0;
-        return b.scrollHeight - b.clientHeight;
-      });
-      if (ov <= 0) break;
-      const base = await page.evaluate(() => {
-        const b = document.querySelector('.fitbody');
-        return parseFloat(b.style.fontSize);
-      });
-      const next = Math.max(20, Math.floor((base * Math.min(0.96, 1 - ov / 2600)) * 10) / 10);
-      if (next >= base) break;
-      await page.evaluate((px) => {
-        const b = document.querySelector('.fitbody');
-        b.style.fontSize = px + 'px';
-      }, next);
-      await page.waitForTimeout(60);
+    const outputFile = path.join(OUT_DIR, `${name}.png`);
+    try {
+      const temporaryFile = path.join(OUT_DIR, `${name}.html`);
+      fs.writeFileSync(temporaryFile, html);
+      await page.goto(`file://${temporaryFile}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(120);
+
+      for (let pass = 0; pass < 8; pass += 1) {
+        const overflows = await page.evaluate(() => [...document.querySelectorAll('.fitbody')].map(element => ({
+          overflow: element.scrollHeight - element.clientHeight,
+          size: parseFloat(element.style.fontSize) || 0
+        })));
+        if (!overflows.some(item => item.overflow > 0)) break;
+        for (const item of overflows.filter(item => item.overflow > 0)) {
+          const nextSize = Math.max(20, Math.floor((item.size * Math.min(.96, 1 - item.overflow / 2600)) * 10) / 10);
+          if (nextSize < item.size) {
+            await page.evaluate(({ from, to }) => {
+              const element = [...document.querySelectorAll('.fitbody')].find(node => parseFloat(node.style.fontSize) === from);
+              if (element) element.style.fontSize = `${to}px`;
+            }, { from: item.size, to: nextSize });
+          }
+        }
+        await page.waitForTimeout(60);
+      }
+
+      const audit = await page.evaluate(() => ({
+        title: Boolean(document.querySelector('.title')),
+        footer: Boolean(document.querySelector('.footer')),
+        badImages: [...document.querySelectorAll('img')].filter(img => !img.complete || img.naturalWidth === 0).length,
+        overflow: [...document.querySelectorAll('.fitbody')].map(element => element.scrollHeight - element.clientHeight),
+        layout: document.body.dataset.layout || 'unknown'
+      }));
+      if (!audit.title || !audit.footer || audit.badImages || audit.overflow.some(value => value > 0)) {
+        throw new Error(`${name}: ${JSON.stringify(audit)}`);
+      }
+      await page.screenshot({ path: outputFile, clip: { x: 0, y: 0, width: 1242, height: 1656 } });
+      console.log(`${outputFile} layout=${audit.layout} overflow=${audit.overflow.join(',') || 'none'} badImages=${audit.badImages}`);
+    } catch (error) {
+      failures.push(error.message);
+      console.error(`SKIP ${error.message}`);
     }
-    await page.screenshot({ path: path.join(OUT_DIR, `${name}.png`), clip: { x: 0, y: 0, width: 1242, height: 1656 } });
-    console.log(path.join(OUT_DIR, `${name}.png`));
   }
   await browser.close();
+  if (failures.length) process.exit(1);
 })();
