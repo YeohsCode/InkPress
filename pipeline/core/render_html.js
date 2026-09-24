@@ -220,7 +220,7 @@ function coverFirstHTML(card, index, total) {
   return pageShell(`
   <main class="page layout-front">
     <section class="leadcolumn">
-      <div class="kicker">TODAY · 9月24日</div>
+      <div class="kicker">TODAY · ${(new Date(report.date)).getMonth() + 1}月${(new Date(report.date)).getDate()}日</div>
       <h1 class="title" style="font-size:90px; margin:28px 0 0;">${titleLines}</h1>
       <div style="width:92px;height:8px;background:${ACCENT};margin:34px 0;"></div>
       <div class="lede" style="font-size:35px; margin-bottom:28px;">${lede}</div>
