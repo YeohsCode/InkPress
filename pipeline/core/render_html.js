@@ -48,59 +48,40 @@ function richText(s) {
 
 function pageShell(inner, opts = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
+  /* ====== 设计系统 v3（2026-09-24 重做）：Apple News / iOS Dynamic Type 语系 ======
+     依据：NN/g legibility（大默认字号+高对比+素背景）、Baymard 50-75 字符行宽、
+     Refactoring UI（灰阶分层+单一强调色克制使用）、Apple HIG type ladder 比例 */
   * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { -webkit-font-smoothing:antialiased; }
   body { width:1242px; height:1656px; font-family:"PingFang SC","Helvetica Neue",sans-serif;
-         background: linear-gradient(160deg, ${BG1} 0%, ${BG2} 100%); color:${INK};
-         position:relative; overflow:hidden; }
-  .deco { position:absolute; border-radius:50%; opacity:.10; }
-  .d1 { width:520px; height:520px; right:-160px; top:-140px; background:${ACCENT}; }
-  .d2 { width:380px; height:380px; left:-120px; bottom:120px; background:${ACCENT2}; }
-  .rail { position:absolute; left:0; top:0; bottom:0; width:14px; background:${ACCENT}; }
-  .kicker { font-size:34px; color:#8A8A8A; letter-spacing:6px; }
-  .chip { display:inline-block; padding:14px 34px; border-radius:44px; color:#fff;
-          font-size:36px; font-weight:600; letter-spacing:2px; background:${ACCENT}; }
+         background:#F7F5F2; color:#111111; position:relative; overflow:hidden; }
+  /* 素背景：去掉渐变+装饰圆，改为纸感单色 + 头部强调色细线 */
+  .topline { position:absolute; top:0; left:0; right:0; height:14px; background:${ACCENT}; }
+  .topmeta { position:absolute; top:52px; left:96px; right:96px; display:flex; justify-content:space-between;
+             font-size:26px; letter-spacing:5px; color:#8A8580; font-weight:500; }
+  .kicker { font-size:28px; color:#8A8580; letter-spacing:6px; font-weight:500; }
+  .chip { display:inline-block; padding:10px 28px; border-radius:12px; color:#fff;
+          font-size:30px; font-weight:600; letter-spacing:3px; background:${ACCENT}; }
   .chip.alt { background:${ACCENT2}; }
-  h1.title { font-size:76px; font-weight:700; line-height:1.28; letter-spacing:1px; }
-  .body { font-size:42px; line-height:1.72; font-weight:400; }
-  .body p { margin-bottom:34px; text-align:justify; }
+  /* type ladder（对齐 iOS Dynamic Type 比例）：title 72 / body 34-40 / caption 26。
+     行宽控制 50-75 字符（Baymard）：左右留白 96px。 */
+  h1.title { font-size:72px; font-weight:800; line-height:1.22; letter-spacing:0.5px; }
+  .body { font-weight:400; color:#2A2A2A; }
+  .body p { margin-bottom:30px; text-align:left; }
   .body p:last-child { margin-bottom:0; }
   em.num { font-style:normal; color:${ACCENT}; font-weight:700; }
-  /* 2026-09-24 fix: em.en was fixed 38px; with body shrunk to 27px the English-tagged lines
-     still laid out at 38*1.72 => page ~40% taller than the shrink formula predicted and the
-     last paragraph got clipped by overflow:hidden (page 08). Use relative size instead. */
   em.en { font-style:normal; color:${ACCENT2}; font-weight:600; font-size:0.9em; }
-  .footer { position:absolute; bottom:52px; left:110px; right:110px; display:flex;
-            justify-content:space-between; align-items:center; font-size:32px; color:#9a938a; }
-  .brand { letter-spacing:4px; }
-  .pgnum { font-weight:600; color:${INK}; }
-  .rule { width:120px; height:8px; background:${ACCENT}; margin:44px 0 52px; border-radius:4px; }
-  .imgbox { border-radius:24px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.14); }
+  .imgbox { border-radius:0; overflow:hidden; box-shadow:none; }
   .imgbox img { width:100%; height:100%; object-fit:cover; display:block; }
+  .rule { width:72px; height:8px; background:${ACCENT}; margin:28px 0; }
+  .footer { position:absolute; bottom:44px; left:96px; right:96px; display:flex;
+            justify-content:space-between; align-items:center; font-size:26px; color:#A29B93;
+            border-top:2px solid #E5E0DA; padding-top:20px; }
+  .pgnum { font-variant-numeric:tabular-nums; letter-spacing:2px; }
   </style></head><body>
-  <div class="deco d1"></div><div class="deco d2"></div>
-  <div class="rail"></div>
+  <div class="topline"></div>
   ${inner}
   </body></html>`;
-}
-
-function coverHTML(spec) {
-  const lines = spec.title_lines.map(l => {
-    const acc = spec.accent_word;
-    if (acc && l.includes(acc)) {
-      const [pre, post] = l.split(acc);
-      return `<div>${esc(pre)}<span style="color:${ACCENT}">${esc(acc)}</span>${esc(post || '')}</div>`;
-    }
-    return `<div>${esc(l)}</div>`;
-  }).join('');
-  return pageShell(`
-  <div style="position:absolute; left:110px; right:100px; top:0; bottom:0; display:flex; flex-direction:column; justify-content:center;">
-    <div class="kicker">${esc(spec.kicker || '')}</div>
-    <div style="height:56px"></div>
-    <div style="font-size:112px; font-weight:800; line-height:1.24; letter-spacing:2px;">${lines}</div>
-    <div class="rule" style="width:220px; height:10px;"></div>
-    <div style="font-size:40px; color:#6f6a63; letter-spacing:8px;">${esc(spec.series || 'AI 圈每日深读')}</div>
-  </div>
-  <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${esc(report.date || '')}</span></div>`);
 }
 
 // ---- 布局选择（2026-09-24 用户要求打破"全部上图下文"）----
@@ -137,9 +118,9 @@ function cardHTML(card, idx, total) {
   <div style="position:absolute; left:0; right:0; top:0; height:820px; overflow:hidden;">
     <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
     <div style="position:absolute; inset:0; background:linear-gradient(180deg, rgba(20,16,12,0.06) 0%, rgba(20,16,12,0.62) 100%);"></div>
-    <div style="position:absolute; left:110px; bottom:40px; right:100px;"><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>
+    <div style="position:absolute; left:96px; bottom:40px; right:96px;"><span class="${chipCls}">${esc(card.tag || (String(idx).padStart(2, '0')))}</span></div>
   </div>
-  <div style="position:absolute; left:110px; right:100px; top:880px; bottom:140px; display:flex; flex-direction:column;">
+  <div style="position:absolute; left:96px; right:96px; top:880px; bottom:124px; display:flex; flex-direction:column;">
     <h1 class="title">${esc(card.title)}</h1>
     <div class="rule"></div>
     <div ${bodyStyle(fs)}>${pts}</div>
@@ -147,14 +128,14 @@ function cardHTML(card, idx, total) {
   } else if (layout === 'side') {
     const fs = est(0.82);
     inner = `
-  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
     ${chipHTML}
     <div style="height:40px"></div>
     <h1 class="title">${esc(card.title)}</h1>
     <div class="rule"></div>
     <div style="flex:1; display:flex; gap:44px; margin-top:40px; min-height:0; align-items:stretch;">
       <div class="body fitbody" data-base="${fs}" style="flex:1.6; min-width:0; overflow:hidden; font-size:${fs}px; line-height:1.72;">${pts}</div>
-      <div style="flex:1; min-width:0; border-radius:24px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.14);">
+      <div style="flex:1; min-width:0; overflow:hidden;">
         <img src="${esc(card.image)}" style="width:100%; height:100%; object-fit:cover; display:block;">
       </div>
     </div>
@@ -162,7 +143,7 @@ function cardHTML(card, idx, total) {
   } else if (layout === 'below') {
     const fs = est(0.66);
     inner = `
-  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
     ${chipHTML}
     <div style="height:40px"></div>
     <h1 class="title">${esc(card.title)}</h1>
@@ -173,7 +154,7 @@ function cardHTML(card, idx, total) {
   } else {
     const fs = est(0.72);
     inner = `
-  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
+  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
     ${chipHTML}
     <div style="height:40px"></div>
     <h1 class="title">${esc(card.title)}</h1>
@@ -183,7 +164,7 @@ function cardHTML(card, idx, total) {
   </div>`;
   }
   return pageShell(inner + `
-  <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
+  <div class="footer"><span>${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
 }
 
 // 封面与第一页整合：第 1 页 = 封面大字区 + 第一卡正文，总计 9 页（2026-09-23 用户要求）
@@ -198,25 +179,23 @@ function mergedFirstHTML(spec, card, idx, total) {
   }).join(' ');
   const pts = card.points.map(p => `<p>${richText(p)}</p>`).join('\n');
   const totalChars = card.points.join('').length;
-  const imgPenalty = card.image ? 0.50 : 0.80;   // 顶部封面区占掉约 560px
+  const imgPenalty = card.image ? 0.50 : 0.80;
   const scale = Math.min(1, imgPenalty * Math.sqrt(260 / totalChars));
   const bodyPx = Math.max(27, Math.round(42 * scale * 10) / 10);
   const img = card.image
-    ? `<div class="imgbox" style="height:260px; margin-bottom:28px;"><img src="${esc(card.image)}"></div>`
+    ? `<div class="imgbox" style="height:240px; margin-bottom:26px; flex:none;"><img src="${esc(card.image)}"></div>`
     : '';
-  const chipCls = 'chip';
   return pageShell(`
-  <div style="position:absolute; left:110px; right:100px; top:96px; bottom:140px; display:flex; flex-direction:column;">
-    <div class="kicker">${esc(spec.kicker || '')}</div>
-    <div style="height:34px"></div>
-    <div style="font-size:84px; font-weight:800; line-height:1.24; letter-spacing:2px;">${lines}</div>
-    <div class="rule" style="margin:36px 0 32px;"></div>
-    <div><span class="${chipCls}">${esc(card.tag || '01')}</span></div>
-    <div style="height:30px"></div>
+  <div class="topmeta"><span>${esc(spec.series || 'AI 圈每日深读')}</span><span>${esc(spec.kicker || '')}</span></div>
+  <div style="position:absolute; left:96px; right:96px; top:132px; bottom:124px; display:flex; flex-direction:column;">
+    <div style="font-size:92px; font-weight:800; line-height:1.18; letter-spacing:1px;">${lines}</div>
+    <div class="rule" style="margin:32px 0;"></div>
+    <div><span class="chip">${esc(card.tag || '01')}</span></div>
+    <div style="height:28px"></div>
     ${img}
-    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.72;">${pts}</div>
+    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.66;">${pts}</div>
   </div>
-  <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">01 / ${String(total).padStart(2, '0')}</span></div>`);
+  <div class="footer"><span>${esc(spec.series || 'AI 圈每日深读')}</span><span class="pgnum">01 / ${String(total).padStart(2, '0')}</span></div>`);
 }
 
 (async () => {
