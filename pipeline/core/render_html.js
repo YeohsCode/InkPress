@@ -65,7 +65,10 @@ function pageShell(inner, opts = {}) {
   .body p { margin-bottom:34px; text-align:justify; }
   .body p:last-child { margin-bottom:0; }
   em.num { font-style:normal; color:${ACCENT}; font-weight:700; }
-  em.en { font-style:normal; color:${ACCENT2}; font-weight:600; font-size:38px; }
+  /* 2026-09-24 fix: em.en was fixed 38px; with body shrunk to 27px the English-tagged lines
+     still laid out at 38*1.72 => page ~40% taller than the shrink formula predicted and the
+     last paragraph got clipped by overflow:hidden (page 08). Use relative size instead. */
+  em.en { font-style:normal; color:${ACCENT2}; font-weight:600; font-size:0.9em; }
   .footer { position:absolute; bottom:52px; left:110px; right:110px; display:flex;
             justify-content:space-between; align-items:center; font-size:32px; color:#9a938a; }
   .brand { letter-spacing:4px; }
@@ -119,7 +122,7 @@ function cardHTML(card, idx, total) {
     <h1 class="title">${esc(card.title)}</h1>
     <div class="rule"></div>
     ${img}
-    <div class="body" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:${lh};">${pts}</div>
+    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:${lh};">${pts}</div>
   </div>
   <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">${String(idx).padStart(2, '0')} / ${String(total).padStart(2, '0')}</span></div>`);
 }
@@ -152,7 +155,7 @@ function mergedFirstHTML(spec, card, idx, total) {
     <div><span class="${chipCls}">${esc(card.tag || '01')}</span></div>
     <div style="height:30px"></div>
     ${img}
-    <div class="body" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.72;">${pts}</div>
+    <div class="body fitbody" data-base="${bodyPx}" style="flex:1; overflow:hidden; font-size:${bodyPx}px; line-height:1.72;">${pts}</div>
   </div>
   <div class="footer"><span class="brand">${esc(report.series || '')}</span><span class="pgnum">01 / ${String(total).padStart(2, '0')}</span></div>`);
 }
@@ -168,6 +171,27 @@ function mergedFirstHTML(spec, card, idx, total) {
     fs.writeFileSync(tmp, html);
     await page.goto('file://' + tmp, { waitUntil: 'networkidle' });
     await page.waitForTimeout(120);
+    // measured auto-fit: heuristic mis-estimates pages with many English <em>; measure real
+    // scroll overflow and shrink until it fits (floor 20px, max 8 passes)
+    for (let fit = 0; fit < 8; fit++) {
+      const ov = await page.evaluate(() => {
+        const b = document.querySelector('.fitbody');
+        if (!b) return 0;
+        return b.scrollHeight - b.clientHeight;
+      });
+      if (ov <= 0) break;
+      const base = await page.evaluate(() => {
+        const b = document.querySelector('.fitbody');
+        return parseFloat(b.style.fontSize);
+      });
+      const next = Math.max(20, Math.floor((base * Math.min(0.96, 1 - ov / 2600)) * 10) / 10);
+      if (next >= base) break;
+      await page.evaluate((px) => {
+        const b = document.querySelector('.fitbody');
+        b.style.fontSize = px + 'px';
+      }, next);
+      await page.waitForTimeout(60);
+    }
     await page.screenshot({ path: path.join(OUT_DIR, `${name}.png`), clip: { x: 0, y: 0, width: 1242, height: 1656 } });
     console.log(path.join(OUT_DIR, `${name}.png`));
   }
