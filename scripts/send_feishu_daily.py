@@ -28,7 +28,7 @@ def send(args, label, retries=1):
 fails = 0
 for i, fn in enumerate(IMGS, 1):
     p = f"{D}/data/images/html/{fn}"
-    if not send(["--to", CHAT, "-s", f"{i}/9 {title}", f"MEDIA:{p}"], f"img{i}"):
+    if not send(["--to", CHAT, "-s", f"{i}/6 {title}", f"MEDIA:{p}"], f"img{i}"):
         fails += 1
 
 lines = [f"AI 圈每天深读 · 2026-09-29｜{rep['cover']['title_lines'][0]}，{rep['cover']['title_lines'][1]}", ""]
@@ -36,8 +36,10 @@ for c in rep["cards"]:
     lines.append("◆ " + c["title"])
     lines.extend(c["points"])
     lines.append("")
-lines.append("参考资料：" + rep["references"][0]["url"])
-if not send(["--to", CHAT, "-s", "9/9 全文文案", "\n".join(lines)], "text"):
+lines.append("参考资料：")
+for r in rep["references"]:
+    lines.append(r)
+if not send(["--to", CHAT, "-s", "6/6 全文文案", "\n".join(lines)], "text"):
     fails += 1
 
 sys.exit(1 if fails else 0)
