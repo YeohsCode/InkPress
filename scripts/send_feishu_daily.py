@@ -14,9 +14,12 @@ rep = json.load(open(f"{D}/data/report.json"))
 title = rep["cover"]["title_lines"][0]
 
 def send(args, label, retries=1):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("HERMES_CRON_AUTO_DELIVER")}
     out = ""
     for _ in range(retries + 1):
-        r = subprocess.run(["hermes", "send"] + args, capture_output=True, text=True, timeout=120)
+        r = subprocess.run(["hermes", "send"] + args, capture_output=True, text=True,
+                           timeout=120, env=env)
         out = r.stdout + r.stderr
         if "sent" in out.lower():
             print(label, "sent")
@@ -28,10 +31,10 @@ def send(args, label, retries=1):
 fails = 0
 for i, fn in enumerate(IMGS, 1):
     p = f"{D}/data/images/html/{fn}"
-    if not send(["--to", CHAT, "-s", f"{i}/6 {title}", f"MEDIA:{p}"], f"img{i}"):
+    if not send(["--to", CHAT, "-s", f"{i}/9 {title}", f"MEDIA:{p}"], f"img{i}"):
         fails += 1
 
-lines = [f"AI 圈每天深读 · 2026-09-29｜{rep['cover']['title_lines'][0]}，{rep['cover']['title_lines'][1]}", ""]
+lines = [f"AI 圈每天深读 · {rep['date']}｜{rep['cover']['title_lines'][0]}，{rep['cover']['title_lines'][1]}", ""]
 for c in rep["cards"]:
     lines.append("◆ " + c["title"])
     lines.extend(c["points"])
@@ -39,7 +42,7 @@ for c in rep["cards"]:
 lines.append("参考资料：")
 for r in rep["references"]:
     lines.append(r)
-if not send(["--to", CHAT, "-s", "6/6 全文文案", "\n".join(lines)], "text"):
+if not send(["--to", CHAT, "-s", "10/9 全文文案", "\n".join(lines)], "text"):
     fails += 1
 
 sys.exit(1 if fails else 0)
