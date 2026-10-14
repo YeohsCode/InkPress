@@ -22,7 +22,7 @@ English sources → daily/weekly candidate bundle → editorial selection and ve
 
 ### Sources
 
-`pipeline/core/digest.py` runs nine collectors and writes `data/daily.json` or `data/weekly.json`. The usual windows are one and seven days, respectively; listing-only sources do not strictly filter by time. A failed source is recorded in the bundle without stopping the others.
+`pipeline/core/digest.py` runs ten collectors and writes `data/daily.json` or `data/weekly.json`. The usual windows are one and seven days, respectively; listing-only sources do not strictly filter by time. A failed source is recorded in the bundle without stopping the others.
 
 | Source | Method | Current behavior |
 | --- | --- | --- |
@@ -35,6 +35,7 @@ English sources → daily/weekly candidate bundle → editorial selection and ve
 | TechCrunch AI | Category RSS | Uses the shared RSS collector. |
 | Ars Technica | Technology RSS | Filters for AI-related keywords. |
 | Simon Willison | Atom feed | Uses the shared RSS collector. |
+| Latent Space | Official RSS | AI engineering articles and podcast episodes; uses the shared RSS collector. |
 
 Collectors store seen item IDs in `pipeline/data/pipeline.db`. The digest also provides `recent_topics` hints from the current report and recent Git commit subjects. These are word-level hints; an editor still decides whether stories overlap.
 
@@ -82,7 +83,7 @@ The editor creates `data/report.json` after selecting and verifying a story. Col
 }
 ```
 
-`image`, `tags`, and theme colors are optional. References belong in the delivered text, not the PNG pages. The HTML renderer uses Songti SC headings and PingFang SC body text, varies its layouts, and checks titles, footers, broken images, and text overflow before each 1242 × 1656 screenshot. The static validator catches banned copy patterns and missing reference links. It cannot verify factual claims; source checking and final visual review remain editorial work.
+`image`, `tags`, and theme colors are optional. References belong in the delivered text, not the PNG pages. The HTML renderer uses Songti SC headings and PingFang SC body text, varies its layouts, and checks titles, footers, broken images, and text overflow before each 1242 × 1656 screenshot. The static validator catches banned copy patterns and missing reference links. EDITORIAL_RULES.md forbids the removed reader-relevance and next-actions columns, including renamed headings. The digest carries these rules and the renderer validates copy before producing images. It cannot verify factual claims; source checking and final visual review remain editorial work.
 
 ### Run locally
 
@@ -122,7 +123,7 @@ REDDIT_CLIENT_SECRET=your_client_secret
 
 ### Delivery and known gaps
 
-Two Feishu sender scripts exist, but both currently assume exactly nine images and hard-code an issue date. Align them with the report's actual page count and date before use. `send_feishu_daily.py` also expects string references, while current reports use `{title, url}` objects. The renderer does not remove old PNGs when a new issue has fewer pages; check the output directory before sending. There is no direct Xiaohongshu publishing command.
+Use `python3 scripts/send_feishu_daily.py --dry-run` to check the issue, then run it without that flag to send through Hermes. It reads the date, page count and references from the report, verifies the renderer's `manifest.json`, and saves per-message receipts in `data/delivery/` so interrupted delivery can resume. The older `send_feishu_api.py` still assumes nine images and a fixed date. There is no direct Xiaohongshu publishing command.
 
 The previous README described a daily 07:05 and Tuesday/Saturday 08:00 schedule. Scheduling lives outside this repository; no scheduler configuration is versioned here. Files in `data/` are local artifacts, not a reproducible sample issue.
 
@@ -146,7 +147,7 @@ The project has been described as MIT-licensed, but this repository currently ha
 
 ### 信源
 
-`pipeline/core/digest.py` 调用九路信源，生成 `data/daily.json` 或 `data/weekly.json`。通常分别取近一天和近七天；只提供最新列表的信源不会严格按时间窗口筛选。单个信源失败会记录在候选包中，不阻断其余信源。
+`pipeline/core/digest.py` 调用十路信源，生成 `data/daily.json` 或 `data/weekly.json`。通常分别取近一天和近七天；只提供最新列表的信源不会严格按时间窗口筛选。单个信源失败会记录在候选包中，不阻断其余信源。
 
 | 信源 | 方式 | 当前行为 |
 | --- | --- | --- |
@@ -159,6 +160,7 @@ The project has been described as MIT-licensed, but this repository currently ha
 | TechCrunch AI | 分类 RSS | 使用通用 RSS 采集器。 |
 | Ars Technica | 技术栏目 RSS | 按 AI 相关关键词过滤。 |
 | Simon Willison | Atom 订阅 | 使用通用 RSS 采集器。 |
+| Latent Space | 官方 RSS | AI 工程文章与播客节目，使用通用 RSS 采集器。 |
 
 采集器将已见条目 ID 存入 `pipeline/data/pipeline.db`。候选包还会根据当前稿件和近期 Git 提交标题生成 `recent_topics` 提示。这是词级提示，编辑仍需判断两个题目是否实际撞题。
 
@@ -182,7 +184,7 @@ data/                    本地稿件、候选包、转写稿和图片（Git 忽
 
 编辑选题、核实后创建 `data/report.json`；采集命令不会自动生成它。这个被 Git 忽略的文件为出图和发送脚本提供定稿文案。`cards` 中每项对应一页，第一页卡片与封面合并。对于当前支持的版式，**N 张 card 生成 N 张 HTML 图片**：`cover.png`、`info_02.png` 等；渲染器目前定义了最多九张 card 的版式。上面的英文部分提供了最小 JSON 示例。
 
-`image`、`tags` 和主题色可选。`references` 用于发送的正文，不进入图片。HTML 渲染器使用宋体标题与苹方正文，按页采用不同版式，截图前检查标题、页脚、失效图片与正文溢出；图片尺寸为 1242 × 1656。静态校验器检查禁用话术和参考资料链接，**不能替代事实核查**；回源核实与最终视觉检查仍由编辑完成。
+`image`、`tags` 和主题色可选。`references` 用于发送的正文，不进入图片。HTML 渲染器使用宋体标题与苹方正文，按页采用不同版式，截图前检查标题、页脚、失效图片与正文溢出；图片尺寸为 1242 × 1656。EDITORIAL_RULES.md 禁止已删除的读者关系页、行动建议页及换名变体；候选包携带规则，渲染器在出图前强制校验。静态校验器检查禁用话术和参考资料链接，**不能替代事实核查**；回源核实与最终视觉检查仍由编辑完成。
 
 ### 本地运行
 
@@ -222,7 +224,7 @@ REDDIT_CLIENT_SECRET=你的_client_secret
 
 ### 发送与已知限制
 
-仓库内有两套飞书发送脚本，但目前都固定发送九张图片，并写死刊期日期。使用前需让发送数量与稿件实际页数、日期一致。`send_feishu_daily.py` 还按字符串处理参考资料，而当前稿件采用 `{title, url}` 对象。新刊页数变少时，渲染器不会清理旧图片，发送前还需核对输出目录。仓库没有直接发布小红书的命令。
+先运行 `python3 scripts/send_feishu_daily.py --dry-run` 检查，再去掉该参数投递。脚本从稿件读取日期、页数和全部参考资料，核对渲染器的 `manifest.json`，并在 `data/delivery/` 保存逐条回执，中断后可续传。旧版 `send_feishu_api.py` 仍固定九张图片与日期。仓库没有直接发布小红书的命令。
 
 旧 README 记载日报 07:05、周二和周六周报 08:00 的排期。调度配置位于仓库之外，没有纳入版本管理。`data/` 下的稿件和图片是本地运行产物，不是可复现的示例刊物。
 

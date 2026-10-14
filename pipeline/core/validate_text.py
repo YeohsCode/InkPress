@@ -21,6 +21,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 # ── 硬禁格式（regex，命中即违规）────────────────────────────────────────
 HARD_BANS = [
+    # 已删除的栏目不得在标题或正文里复活，包括人称/措辞变体。
+    (r"[跟与你您我](?:你|您|我)?(?:们)?有[什么何啥]+关系|接下来(?:该|要|能|应该)?(?:干什么|做什么|怎么做|怎么办)",
+     "已删除「跟你有什么关系 / 接下来干什么」栏目及其变体"),
     # 用户 2026-09-22 指令
     (r"但[^。！？，]{0,30}是[，。：]",
      "禁用「但……是……」对照句式"),
@@ -57,6 +60,10 @@ HARD_BANS = [
 
 # 收藏类文案允许的提示词（若命中上条“收藏起来”但属于以上短语则仍禁）
 REF_LINE = re.compile(r"^参考资料|^来源|^Refs?[:：]|^参考[:：]")
+REMOVED_HEADING = re.compile(
+    r"(?:读者|用户|你|您|我们|普通人).{0,8}(?:关系|影响|意味|启示|建议|行动)|"
+    r"(?:下一步|接下来|怎么跟进|如何跟进|行动建议|给.{0,6}的建议|与.{0,6}的关系)"
+)
 
 
 def _iter_fields(report):
@@ -66,8 +73,13 @@ def _iter_fields(report):
         yield f"cover.title_lines[{i}]", ln
     if cover.get("kicker"):
         yield "cover.kicker", cover["kicker"]
+    if report.get("series"):
+        yield "series", report["series"]
     for ci, card in enumerate(report.get("cards", [])):
         yield f"cards[{ci}].title", card.get("title", "")
+        for field in ("tag", "side_label"):
+            if card.get(field):
+                yield f"cards[{ci}].{field}", card[field]
         for pi, p in enumerate(card.get("points", [])):
             yield f"cards[{ci}].points[{pi}]", p
 
@@ -75,6 +87,8 @@ def _iter_fields(report):
 def validate(report):
     problems = []
     for where, text in _iter_fields(report):
+        if not ".points[" in where and REMOVED_HEADING.search(text):
+            problems.append(f"[{where}] 已删除的读者关系页/行动建议页（含换名标题）: 「{text}」")
         for pat, msg in HARD_BANS:
             m = re.search(pat, text)
             if m:
@@ -89,7 +103,7 @@ def validate(report):
             if not re.search(r"https?://", str(ref)):
                 problems.append(f"[references[{ri}]] 缺链接（参考资料必须带原文 URL）")
 
-    # 配图硬校验（用户 2026-09-23/24 指令）：至少 4 张 cards 配 card.image
+    # 配图校验：至少 4 张 cards 配 card.image（无图的 card 由渲染器走纯文字版式）
     cards = report.get("cards", [])
     n_img = sum(1 for c in cards if c.get("image"))
     if len(cards) >= 6 and n_img < 4:
@@ -122,6 +136,16 @@ def validate(report):
                         f"[cards[{ci}].title] 标题写「{num_txt}步/个」但正文只有 {cnt} 个编号动作，数量对不上"
                     )
     return problems
+
+
+def load_valid_report(path):
+    """Load copy for delivery and reject removed columns before any external calls."""
+    with open(path, encoding="utf-8") as f:
+        report = json.load(f)
+    problems = validate(report)
+    if problems:
+        raise ValueError("文案校验失败，停止投递：\n" + "\n".join(problems))
+    return report
 
 
 def main():

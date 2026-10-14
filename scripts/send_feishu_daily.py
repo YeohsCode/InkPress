@@ -1,48 +1,114 @@
 #!/usr/bin/env python3
-"""把 data/report.json 对应的 9 张图 + 全文文案逐条发到飞书日报群。
-发送通道 = `hermes send --to feishu:<chat_id>`；渠道来自环境变量 FEISHU_DAILY_CHAT，
-未设置时回落到日报群 oc_4f6f0ec40c6b9fb609ed619bfa60f659。
-每条发送后校验输出含 sent，失败重试 1 次，退出码非 0 表示有未送达项。"""
-import subprocess, json, time, os, sys
+"""Validate rendered issue, then deliver via Hermes with resumable receipts."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
 
-D = "/Users/andrewyeoh/Werk/projects/content-pipeline"
-CHAT = os.environ.get("FEISHU_DAILY_CHAT", "feishu:oc_4f6f0ec40c6b9fb609ed619bfa60f659")
-IMGS = ["cover.png","info_02.png","info_03.png","info_04.png","info_05.png",
-        "info_06.png","info_07.png","info_08.png","info_09.png"]
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from pipeline.core.validate_text import load_valid_report
 
-rep = json.load(open(f"{D}/data/report.json"))
-title = rep["cover"]["title_lines"][0]
 
-def send(args, label, retries=1):
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith("HERMES_CRON_AUTO_DELIVER")}
-    out = ""
-    for _ in range(retries + 1):
-        r = subprocess.run(["hermes", "send"] + args, capture_output=True, text=True,
-                           timeout=120, env=env)
-        out = r.stdout + r.stderr
-        if "sent" in out.lower():
-            print(label, "sent")
-            return True
-        time.sleep(3)
-    print(label, "FAIL:", out.strip()[:200])
-    return False
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-fails = 0
-for i, fn in enumerate(IMGS, 1):
-    p = f"{D}/data/images/html/{fn}"
-    if not send(["--to", CHAT, "-s", f"{i}/9 {title}", f"MEDIA:{p}"], f"img{i}"):
-        fails += 1
 
-lines = [f"AI 圈每天深读 · {rep['date']}｜{rep['cover']['title_lines'][0]}，{rep['cover']['title_lines'][1]}", ""]
-for c in rep["cards"]:
-    lines.append("◆ " + c["title"])
-    lines.extend(c["points"])
-    lines.append("")
-lines.append("参考资料：")
-for r in rep["references"]:
-    lines.append(r)
-if not send(["--to", CHAT, "-s", "10/9 全文文案", "\n".join(lines)], "text"):
-    fails += 1
+def full_text(report):
+    title = '，'.join(report['cover']['title_lines'])
+    lines = [f"{report.get('series', 'AI 圈每天深读')} · {report['date']}｜{title}", '']
+    for card in report['cards']:
+        lines.extend([card['title'], *card['points'], ''])
+    lines.append('参考资料：')
+    for ref in report['references']:
+        lines.append(f"{ref.get('title', '来源')}：{ref['url']}" if isinstance(ref, dict) else ref)
+    if report.get('tags'):
+        lines.extend(['', ' '.join('#' + tag for tag in report['tags'])])
+    lines.extend(report.get('source_notes', []))
+    if report.get('quality_check'):
+        check = report['quality_check']
+        lines.extend(['', '文案自检：' + ' / '.join(map(str, check['scores'])) +
+                      f"，合计 {check['total']}/30。" + check['evidence']])
+    return '\n'.join(lines)
 
-sys.exit(1 if fails else 0)
+
+def prepare(report_path, image_dir):
+    report = load_valid_report(report_path)
+    fingerprint = digest(report_path)
+    manifest = json.loads((image_dir / 'manifest.json').read_text())
+    expected = ['cover.png'] + [f'info_{i:02}.png' for i in range(2, len(report['cards']) + 1)]
+    if (manifest['report_sha256'] != fingerprint or manifest['date'] != report['date'] or
+            [image['name'] for image in manifest['images']] != expected):
+        raise ValueError('渲染结果与稿件不一致，请重新渲染')
+    for image in manifest['images']:
+        if digest(image_dir / image['name']) != image['sha256']:
+            raise ValueError('图片已变动，请重新渲染：' + image['name'])
+    return report, fingerprint, expected
+
+
+def send(args, env):
+    for attempt in range(2):
+        try:
+            result = subprocess.run(['hermes', 'send', *args], capture_output=True,
+                                    text=True, timeout=120, env=env)
+            output = result.stdout + result.stderr
+            if result.returncode == 0 and re.search(r'\bsent\b', output, re.I):
+                return output.strip()
+            error = output.strip()[-500:]
+        except subprocess.TimeoutExpired:
+            # A timeout may already have delivered; avoid an automatic duplicate.
+            raise RuntimeError('发送超时，送达状态不明，停止以避免重复投递')
+        if attempt == 0:
+            time.sleep(3)
+    raise RuntimeError(error)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--images-only', action='store_true', help='Deliver a revised layout without repeating the article text')
+    parser.add_argument('--pages', nargs='+', type=int, help='Deliver only these numbered image pages')
+    args = parser.parse_args()
+    report, fingerprint, images = prepare(ROOT / 'data/report.json', ROOT / 'data/images/html')
+    chat = os.environ.get('FEISHU_DAILY_CHAT', 'feishu:oc_4f6f0ec40c6b9fb609ed619bfa60f659')
+    if not chat.startswith('feishu:'):
+        chat = 'feishu:' + chat
+    title = '，'.join(report['cover']['title_lines'])
+    if args.pages is not None and any(number < 1 or number > len(images) for number in args.pages):
+        parser.error(f'--pages must be between 1 and {len(images)}')
+    selected_pages = set(args.pages) if args.pages is not None else set(range(1, len(images) + 1))
+    items = [(f'img{i}', ['--to', chat, '-s', f'{i}/{len(images)} {title}',
+                         'MEDIA:' + str(ROOT / 'data/images/html' / name)])
+             for i, name in enumerate(images, 1) if i in selected_pages]
+    if not args.images_only and args.pages is None:
+        items.append(('text', ['--to', chat, '-s', f"{report['date']} 全文文案", full_text(report)]))
+    if args.dry_run:
+        print(f"PASS {report['date']}：{len(selected_pages)} 张图{' + 全文' if not args.images_only and args.pages is None else ''}；稿件、图片哈希一致")
+        return
+    receipt_dir = ROOT / 'data/delivery'
+    receipt_dir.mkdir(exist_ok=True)
+    target_hash = hashlib.sha256(chat.encode()).hexdigest()[:12]
+    receipt_path = receipt_dir / f"{report['date']}-{fingerprint[:16]}-{target_hash}.json"
+    receipts = json.loads(receipt_path.read_text()) if receipt_path.exists() else {
+        'date': report['date'], 'report_sha256': fingerprint, 'chat': chat, 'sent': {}}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith('HERMES_CRON_AUTO_DELIVER')}
+    for label, send_args in items:
+        if label in receipts['sent']:
+            print(label, 'already sent', flush=True)
+            continue
+        receipts['sent'][label] = send(send_args, env)
+        temporary = receipt_path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(receipts, ensure_ascii=False, indent=2))
+        temporary.replace(receipt_path)
+        print(label, 'sent', flush=True)
+    print('PASS 全部投递完成，回执：' + str(receipt_path))
+
+
+if __name__ == '__main__':
+    main()

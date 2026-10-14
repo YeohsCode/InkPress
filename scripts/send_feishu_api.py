@@ -10,6 +10,11 @@ CHAT = os.environ.get("FEISHU_DAILY_CHAT", "oc_4f6f0ec40c6b9fb609ed619bfa60f659"
 IMGS = ["cover.png","info_02.png","info_03.png","info_04.png","info_05.png",
         "info_06.png","info_07.png","info_08.png","info_09.png"]
 
+sys.path.insert(0, D)
+from pipeline.core.validate_text import load_valid_report
+
+rep = load_valid_report(f"{D}/data/report.json")
+
 env = {}
 for line in open(os.path.expanduser("~/.hermes/.env")):
     line = line.strip()
@@ -67,7 +72,6 @@ def send_image(path):
               body, {"Content-Type": "application/json", **H})
     return r2, key
 
-rep = json.load(open(f"{D}/data/report.json"))
 title = rep["cover"]["title_lines"][0]
 fails = 0
 for i, fn in enumerate(IMGS, 1):

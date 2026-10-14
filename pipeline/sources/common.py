@@ -4,7 +4,10 @@ import gzip
 import io
 import json
 import re
+import ssl
+import subprocess
 import time
+import urllib.error
 import urllib.request
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126 Safari/537.36"
@@ -12,9 +15,21 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/
 
 def fetch(url, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
-    resp = urllib.request.urlopen(req, timeout=timeout)
-    data = resp.read()
-    if resp.headers.get("Content-Encoding") == "gzip" or data[:2] == b"\x1f\x8b":
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+            encoding = resp.headers.get("Content-Encoding")
+    except (ssl.SSLError, urllib.error.URLError) as error:
+        reason = getattr(error, "reason", error)
+        if not isinstance(reason, ssl.SSLError) or not url.startswith("https://"):
+            raise
+        # macOS curl uses a separate TLS stack; keep certificate verification enabled.
+        return subprocess.check_output([
+            "curl", "--fail", "--silent", "--show-error", "--location",
+            "--proto", "=https", "--proto-redir", "=https", "--compressed",
+            "--max-time", str(timeout), "--user-agent", UA, url,
+        ], timeout=timeout + 5)
+    if encoding == "gzip" or data[:2] == b"\x1f\x8b":
         data = gzip.GzipFile(fileobj=io.BytesIO(data)).read()
     return data
 

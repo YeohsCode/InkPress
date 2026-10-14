@@ -9,6 +9,13 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA = os.path.join(ROOT, "data")
+SOURCES = ["tbpn", "a16z", "reddit", "youtube", "hn",
+           "openai_news", "techcrunch_ai", "arstechnica", "simonw", "latent_space"]
+EDITORIAL_RULES = {
+    "rules_file": "EDITORIAL_RULES.md",
+    "removed_sections": ["跟你有什么关系", "接下来干什么"],
+    "instruction": "禁止读者关系页、行动建议页及其换名变体；按事件事实、机制、证据与分析推进，结尾继续讲事件，不对读者喊话或布置任务。",
+}
 
 
 def run_source(module, since):
@@ -99,10 +106,9 @@ def main():
     today = datetime.date.today().isoformat()
     os.makedirs(DATA, exist_ok=True)
 
-    digest = {"mode": args.mode, "date": today, "sources": {}}
-    mods = ["tbpn", "a16z", "reddit", "youtube", "hn",
-            "openai_news", "techcrunch_ai", "arstechnica", "simonw"]
-    for mod in mods:
+    digest = {"mode": args.mode, "date": today, "editorial_rules": EDITORIAL_RULES,
+              "sources": {}}
+    for mod in SOURCES:
         digest["sources"][mod] = run_source(mod, since)
         if digest["sources"][mod].get("auth_required"):
             digest["sources"][mod]["note"] = "需要配置 data/reddit.env（见 reddit.env.example）"

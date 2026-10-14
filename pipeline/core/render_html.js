@@ -2,14 +2,22 @@
 /* HTML → PNG 渲染器（v4：内容驱动的编辑部版式）。 */
 const path = require('path');
 const fs = require('fs');
+const { createHash } = require('crypto');
+const { magazineHTML } = require('./magazine_layouts');
+const { mastheadTitle } = require('./publication');
 const { chromium } = require(path.join('/Users/andrewyeoh/Werk/HermesAgent/code/node_modules/playwright'));
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const reportPath = process.argv[2] || path.join(ROOT, 'data', 'report.json');
+// 渲染前强制校验，避免定时写稿跳过独立校验步骤后仍然出图。
+const { execFileSync } = require('child_process');
+execFileSync(process.env.PYTHON || 'python3', ['-m', 'pipeline.core.validate_text', reportPath],
+  { cwd: ROOT, stdio: 'inherit' });
 const OUT_DIR = path.join(ROOT, 'data', 'images', 'html');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+const reportBytes = fs.readFileSync(reportPath);
+const report = JSON.parse(reportBytes.toString('utf8'));
 const THEME = report.theme || {};
 const ACCENT = THEME.accent || '#C8442A';
 const ACCENT2 = THEME.accent2 || '#1F5F7A';
@@ -173,6 +181,7 @@ function pageShell(inner, index, total, layout) {
   .pageno { font-variant-numeric:tabular-nums; color:${ACCENT}; font-weight:700; }
   .fitbody { overflow:hidden; min-height:0; }
   main.layout-front { display:grid; grid-template-columns:1.24fr .76fr; gap:46px; }
+  .layout-front .title > span { display:block; }
   .layout-front .leadcolumn { display:flex; flex-direction:column; min-width:0; }
   figure.layout-hero.stage { position:absolute; top:0; left:0; right:0; height:630px; }
   figure.layout-hero.stage .image { height:100%; }
@@ -200,7 +209,7 @@ function pageShell(inner, index, total, layout) {
   .layout-endpoint .numberrow + .numberrow { margin-top:30px; border-top:1px solid #DDD6CA; padding-top:28px; }
   </style></head><body data-layout="${esc(layout)}">
   <div class="topline"></div>
-  <div class="masthead"><span class="brand">${esc(report.series || 'AI 圈每日深读')}</span><span>${esc(report.cover.kicker || '')}</span></div>
+  <div class="masthead"><span class="brand">${esc(report.series || 'AI 圈每日深读')}</span><span>${esc(mastheadTitle(report.cover.kicker))}</span></div>
   ${inner}
   <div class="footer"><span>${esc(report.series || 'AI 圈每日深读')}</span><span class="pageno">${pageNo} / ${String(total).padStart(2, '0')}</span></div>
   </body></html>`;
@@ -228,7 +237,7 @@ function coverFirstHTML(card, index, total) {
     </section>
     <section style="display:flex;flex-direction:column;min-width:0;">
       ${statBlocks(stats, 3)}
-      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;margin-top:24px;"')}
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', `class="image fitbody" style="flex:1;margin-top:24px;${card.image ? '' : 'display:none;'}"`)}
     </section>
   </main>`, index, total, 'front');
 }
@@ -236,9 +245,11 @@ function coverFirstHTML(card, index, total) {
 function heroHTML(card, index, total) {
   const { lede, body } = ledeBody(card.points);
   const bodySize = 32;
+  // 无配图时顶部舞台区留空=白版，改为全文版式（文案区占满整页）
+  const copyTop = card.image ? '' : ' style="top:126px;"';
   return pageShell(`
-  <figure class="layout-hero stage">${imageHTML(card)}</figure>
-  <main class="layout-hero copy">
+  ${card.image ? `<figure class="layout-hero stage">${imageHTML(card)}</figure>` : ''}
+  <main class="layout-hero copy"${copyTop}>
     <div class="kicker">${esc(card.tag || '')}</div>
     <h1 class="title" style="margin:24px 0 26px;">${esc(card.title)}</h1>
     <div class="lede" style="font-size:38px; margin-bottom:28px;">${lede}</div>
@@ -258,8 +269,8 @@ function statHTML(card, index, total) {
     <section class="lower">
       <div class="body fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
       <aside style="display:flex;flex-direction:column;min-width:0;">
-        <div class="lede" style="font-size:32px;margin-bottom:24px;">${lede}</div>
-        ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;"')}
+        ${card.image ? '' : `<div class="lede" style="font-size:32px;margin-bottom:24px;">${lede}</div>`}
+        ${imageHTML(card, 'fitbody').replace('class="image fitbody"', `class="image fitbody" style="flex:1;${card.image ? '' : 'display:none;'}"`)}
       </aside>
     </section>
   </main>`, index, total, 'stat');
@@ -277,7 +288,7 @@ function verifyHTML(card, index, total) {
     ${statBlocks(stats, 3)}
     <section class="lower">
       <div class="body fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
-      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="height:100%;"')}
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', `class="image fitbody" style="height:100%;${card.image ? '' : 'display:none;'}"`)}
     </section>
   </main>`, index, total, 'verify');
 }
@@ -292,30 +303,44 @@ function quoteHTML(card, index, total) {
     <blockquote class="lede bigquote">${lede}</blockquote>
     <div class="body columns fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
   </main>`, index, total, 'quote').replace('<div class="topline"></div>',
-    `<figure class="image" style="position:absolute;left:0;right:0;bottom:104px;height:430px;z-index:1;">${imageHTML(card)}</figure><div class="topline"></div>`);
+    card.image
+      ? `<figure class="image" style="position:absolute;left:0;right:0;bottom:104px;height:430px;z-index:1;">${imageHTML(card)}</figure><div class="topline"></div>`
+      : '<div class="topline"></div>');
 }
 
 function indexHTML(card, index, total) {
   const { lede } = ledeBody(card.points);
   const bodySize = 27;
+  // 无配图时右栏底部会剩图片位置的空白：内容整体垂直居中、编号行均匀分布
+  const spread = card.image ? '' : 'justify-content:center;';
   return pageShell(`
   <main class="page layout-index">
-    <section class="left">
+    <section class="left" style="${spread}">
       <div class="kicker">${esc(card.tag || '')}</div>
       <h1 class="title" style="font-size:66px;margin:26px 0 30px;">${esc(card.title)}</h1>
       <div class="lede fitbody" data-base="${bodySize + 7}" style="font-size:${bodySize + 7}px;line-height:1.45;">${lede}</div>
-      <div style="flex:1;"></div>
+      ${card.image ? '<div style="flex:1;"></div>' : ''}
     </section>
-    <section class="right">
-      <div class="numbered fitbody" data-base="${bodySize}" style="flex:1;font-size:${bodySize}px;">${numberedRows(card.points)}</div>
-      ${imageHTML(card).replace('class="image"', 'class="image" style="height:330px;margin:34px -96px 0;"')}
+    <section class="right" style="${spread}">
+      <div class="numbered fitbody" data-base="${bodySize}" style="${card.image ? 'flex:1;' : 'justify-content:space-evenly;gap:34px;'}font-size:${bodySize}px;">${numberedRows(card.points)}</div>
+      ${imageHTML(card).replace('class="image"', `class="image" style="height:330px;margin:34px -96px 0;${card.image ? '' : 'display:none;'}"`)}
     </section>
   </main>`, index, total, 'index');
 }
 
 function weaveHTML(card, index, total) {
-  const { lede } = ledeBody(card.points);
+  const { lede, body } = ledeBody(card.points);
   const bodySize = 30;
+  // 无配图时双栏右栏会剩大块空白，退化为单栏全文版式
+  if (!card.image) {
+    return pageShell(`
+  <main class="page layout-weave copy" style="display:flex;flex-direction:column;">
+    <div class="kicker">${esc(card.tag || '')}</div>
+    <h1 class="title" style="font-size:66px;margin:24px 0 28px;">${esc(card.title)}</h1>
+    <div class="lede" style="font-size:36px;margin-bottom:26px;">${lede}</div>
+    <div class="body fitbody" data-base="${bodySize}" style="flex:1;font-size:${bodySize}px;">${body}</div>
+  </main>`, index, total, 'weave');
+  }
   return pageShell(`
   <main class="page layout-weave copy">
     <section style="display:flex;flex-direction:column;min-width:0;">
@@ -325,9 +350,9 @@ function weaveHTML(card, index, total) {
       <div class="body fitbody" data-base="${bodySize}" style="flex:1;font-size:${bodySize}px;">${richText(card.points[1] || '')}</div>
     </section>
     <section class="visual">
-      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="height:59%;"')}
+      ${imageHTML(card, 'fitbody').replace('class="image fitbody"', `class="image fitbody" style="height:59%;${card.image ? '' : 'display:none;'}"`)}
       <div style="flex:1;background:#FFF;border-top:5px solid ${ACCENT2};padding:34px 32px;box-shadow:0 16px 36px rgba(60,48,37,.08);">
-        <div style="font-size:23px;letter-spacing:3px;color:${ACCENT2};font-weight:700;">LOCAL-FIRST</div>
+        <div style="font-size:23px;letter-spacing:3px;color:${ACCENT2};font-weight:700;">${esc(card.side_label || 'LOCAL-FIRST')}</div>
         <div style="width:44px;height:3px;background:${ACCENT2};margin:18px 0 22px;"></div>
         <div class="body" style="font-size:26px;line-height:1.58;">${richText(card.points[2] || '')}</div>
       </div>
@@ -345,7 +370,7 @@ function stepsHTML(card, index, total) {
     ${statBlocks(stats, 3)}
     <section class="lower">
       <div class="numbered fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${numberedRows(card.points)}</div>
-      <aside style="display:flex;flex-direction:column;min-width:0;">
+      <aside style="display:flex;flex-direction:column;min-width:0;${card.image ? '' : 'display:none;'}">
         ${imageHTML(card, 'fitbody').replace('class="image fitbody"', 'class="image fitbody" style="flex:1;"')}
       </aside>
     </section>
@@ -368,20 +393,21 @@ function endpointHTML(card, index, total) {
 
 function cardHTML(card, index, total) {
   const layouts = [heroHTML, statHTML, verifyHTML, quoteHTML, indexHTML, weaveHTML, stepsHTML, endpointHTML];
-  return layouts[index - 2](card, index, total);
+  return layouts[(index - 2) % layouts.length](card, index, total);
 }
 
 (async () => {
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
   const page = await browser.newPage({ viewport: { width: 1242, height: 1656 }, deviceScaleFactor: 2 });
-  const shots = [['cover', coverFirstHTML(report.cards[0], 1, report.cards.length)]];
+  const magazine = report.design?.style === 'magazine';
+  const shots = [['cover', magazine ? magazineHTML(report, report.cards[0], 1, report.cards.length) : coverFirstHTML(report.cards[0], 1, report.cards.length)]];
   report.cards.slice(1).forEach((card, offset) => {
     const index = offset + 2;
-    shots.push([`info_${String(index).padStart(2, '0')}`, cardHTML(card, index, report.cards.length)]);
+    shots.push([`info_${String(index).padStart(2, '0')}`, magazine ? magazineHTML(report, card, index, report.cards.length) : cardHTML(card, index, report.cards.length)]);
   });
 
   const failures = [];
-  for (const [name, html] of shots) {
+  for (const [shotIndex, [name, html]] of shots.entries()) {
     const outputFile = path.join(OUT_DIR, `${name}.png`);
     try {
       const temporaryFile = path.join(OUT_DIR, `${name}.html`);
@@ -412,8 +438,18 @@ function cardHTML(card, index, total) {
         footer: Boolean(document.querySelector('.footer')),
         badImages: [...document.querySelectorAll('img')].filter(img => !img.complete || img.naturalWidth === 0).length,
         overflow: [...document.querySelectorAll('.fitbody')].map(element => element.scrollHeight - element.clientHeight),
-        layout: document.body.dataset.layout || 'unknown'
+        layout: document.body.dataset.layout || 'unknown',
+        sourceParagraphs: [...document.querySelectorAll('[data-source-paragraph]')]
+          .sort((a, b) => Number(a.dataset.sourceParagraph) - Number(b.dataset.sourceParagraph))
+          .map(node => node.textContent),
+        clippedCopy: [...document.querySelectorAll('.source-copy,.title,.lede')].filter(node => {
+          const r = node.getBoundingClientRect();
+          return r.left < 0 || r.right > 1243 || r.top < 0 || r.bottom > 1550;
+        }).length
       }));
+      if (magazine && (JSON.stringify(audit.sourceParagraphs) !== JSON.stringify(report.cards[shotIndex].points) || audit.clippedCopy)) {
+        throw new Error(`${name}: missing or clipped source copy ${JSON.stringify(audit)}`);
+      }
       if (!audit.title || !audit.footer || audit.badImages || audit.overflow.some(value => value > 0)) {
         throw new Error(`${name}: ${JSON.stringify(audit)}`);
       }
@@ -426,4 +462,12 @@ function cardHTML(card, index, total) {
   }
   await browser.close();
   if (failures.length) process.exit(1);
+  const sha256 = data => createHash('sha256').update(data).digest('hex');
+  fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify({
+    date: report.date,
+    report_sha256: sha256(reportBytes),
+    images: shots.map(([name]) => ({
+      name: `${name}.png`, sha256: sha256(fs.readFileSync(path.join(OUT_DIR, `${name}.png`)))
+    }))
+  }, null, 2));
 })();
