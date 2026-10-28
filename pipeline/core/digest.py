@@ -15,6 +15,8 @@ EDITORIAL_RULES = {
     "rules_file": "EDITORIAL_RULES.md",
     "removed_sections": ["跟你有什么关系", "接下来干什么"],
     "instruction": "禁止读者关系页、行动建议页及其换名变体；按事件事实、机制、证据与分析推进，结尾继续讲事件，不对读者喊话或布置任务。",
+    "visual_policy": "不设配图数量门槛。禁止见文末等悬空引用。数据页使用原图或由正文数字生成的 visual.kind=bars；机制页可用 diagram。所有配图需 source_url、caption 与逐字对应本页正文的 evidence；图库示意图不能替代数据证据。格式见 pipeline/core/README_render.md。",
+    "date_policy": "report.date 是期号日期，必须与 cover.kicker 的日期一致；原文发布日期、数据截止日和图表截止日分别核实并标注，不强行改成同一天。",
 }
 
 

@@ -14,6 +14,7 @@ from pipeline.sources import latent_space, rssbase
 class EditorialRulesTest(unittest.TestCase):
     def setUp(self):
         self.report = {
+            "date": "2026-10-28",
             "cover": {"title_lines": ["Claude Code 的变化"], "kicker": "访谈观察"},
             "cards": [{"title": "权限边界仍需由系统控制", "points": ["研究团队公布了实验细节。"]}],
             "references": [{"url": "https://www.latent.space/p/thariq"}],

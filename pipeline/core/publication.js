@@ -5,4 +5,10 @@ function mastheadTitle(kicker = '') {
   return issue ? `${PUBLICATION_TITLE} · ${issue}` : PUBLICATION_TITLE;
 }
 
-module.exports = { PUBLICATION_TITLE, mastheadTitle };
+function issueDateLabel(date) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new Error('Invalid issue date');
+  return `${Number(match[2])}月${Number(match[3])}日`;
+}
+
+module.exports = { PUBLICATION_TITLE, mastheadTitle, issueDateLabel };

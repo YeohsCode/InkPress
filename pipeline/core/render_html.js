@@ -4,7 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const { createHash } = require('crypto');
 const { magazineHTML } = require('./magazine_layouts');
-const { mastheadTitle } = require('./publication');
+const { mastheadTitle, issueDateLabel } = require('./publication');
+const { auditCopy } = require('./render_audit');
+const { evidenceHTML } = require('./evidence_visuals');
 const { chromium } = require(path.join('/Users/andrewyeoh/Werk/HermesAgent/code/node_modules/playwright'));
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -180,11 +182,13 @@ function pageShell(inner, index, total, layout) {
     font-size:23px; font-weight:500; letter-spacing:2px; color:#8A8378; }
   .pageno { font-variant-numeric:tabular-nums; color:${ACCENT}; font-weight:700; }
   .fitbody { overflow:hidden; min-height:0; }
-  main.layout-front { display:grid; grid-template-columns:1.24fr .76fr; gap:46px; }
+  main.layout-front { display:grid; grid-template-columns:1.24fr .76fr; grid-template-rows:minmax(0,1fr); gap:46px; }
   .layout-front .title > span { display:block; }
-  .layout-front .leadcolumn { display:flex; flex-direction:column; min-width:0; }
-  figure.layout-hero.stage { position:absolute; top:0; left:0; right:0; height:630px; }
+  .layout-front .leadcolumn { display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .layout-front .leadcolumn > :not(.fitbody) { flex-shrink:0; }
+  figure.layout-hero.stage { position:absolute; top:126px; left:76px; right:76px; height:504px; }
   figure.layout-hero.stage .image { height:100%; }
+  figure.layout-hero.stage .image img { object-fit:contain; }
   main.layout-hero.copy { position:absolute; left:96px; right:96px; top:690px; bottom:132px;
     display:flex; flex-direction:column; }
   main.layout-stat.copy { display:flex; flex-direction:column; }
@@ -195,7 +199,8 @@ function pageShell(inner, index, total, layout) {
   .layout-quote .bigquote { font-size:50px; line-height:1.32; padding:0 0 32px;
     border-bottom:1px solid #D9D2C6; margin-bottom:30px; }
   .layout-quote .columns { flex:1; column-count:2; column-gap:46px; }
-  .layout-quote .columns p { break-inside:avoid-column; }
+  .layout-quote .columns p { break-inside:auto; }
+  .layout-quote .quote-photo { flex:none; height:320px; margin:30px -96px 0; }
   .layout-index { display:grid; grid-template-columns:.84fr 1.16fr; }
   .layout-index .left { display:flex; flex-direction:column; padding-right:40px; min-width:0; }
   .layout-index .right { display:flex; flex-direction:column; min-width:0; padding-top:72px; }
@@ -229,8 +234,8 @@ function coverFirstHTML(card, index, total) {
   return pageShell(`
   <main class="page layout-front">
     <section class="leadcolumn">
-      <div class="kicker">TODAY · ${(new Date(report.date)).getMonth() + 1}月${(new Date(report.date)).getDate()}日</div>
-      <h1 class="title" style="font-size:90px; margin:28px 0 0;">${titleLines}</h1>
+      <div class="kicker">TODAY · ${issueDateLabel(report.date)}</div>
+      <h1 class="title" style="font-size:66px; margin:28px 0 0;">${titleLines}</h1>
       <div style="width:92px;height:8px;background:${ACCENT};margin:34px 0;"></div>
       <div class="lede" style="font-size:35px; margin-bottom:28px;">${lede}</div>
       <div class="body fitbody" data-base="${bodySize}" style="flex:1; font-size:${bodySize}px;">${body}</div>
@@ -302,10 +307,8 @@ function quoteHTML(card, index, total) {
     <h1 class="title" style="margin:22px 0 30px;">${esc(card.title)}</h1>
     <blockquote class="lede bigquote">${lede}</blockquote>
     <div class="body columns fitbody" data-base="${bodySize}" style="font-size:${bodySize}px;">${body}</div>
-  </main>`, index, total, 'quote').replace('<div class="topline"></div>',
-    card.image
-      ? `<figure class="image" style="position:absolute;left:0;right:0;bottom:104px;height:430px;z-index:1;">${imageHTML(card)}</figure><div class="topline"></div>`
-      : '<div class="topline"></div>');
+    ${imageHTML(card, 'quote-photo')}
+  </main>`, index, total, 'quote');
 }
 
 function indexHTML(card, index, total) {
@@ -400,10 +403,14 @@ function cardHTML(card, index, total) {
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
   const page = await browser.newPage({ viewport: { width: 1242, height: 1656 }, deviceScaleFactor: 2 });
   const magazine = report.design?.style === 'magazine';
-  const shots = [['cover', magazine ? magazineHTML(report, report.cards[0], 1, report.cards.length) : coverFirstHTML(report.cards[0], 1, report.cards.length)]];
+  const renderCard = (card, index) => card.visual
+    ? evidenceHTML(report, card, index, report.cards.length)
+    : magazine ? magazineHTML(report, card, index, report.cards.length)
+    : index === 1 ? coverFirstHTML(card, index, report.cards.length) : cardHTML(card, index, report.cards.length);
+  const shots = [['cover', renderCard(report.cards[0], 1)]];
   report.cards.slice(1).forEach((card, offset) => {
     const index = offset + 2;
-    shots.push([`info_${String(index).padStart(2, '0')}`, magazine ? magazineHTML(report, card, index, report.cards.length) : cardHTML(card, index, report.cards.length)]);
+    shots.push([`info_${String(index).padStart(2, '0')}`, renderCard(card, index)]);
   });
 
   const failures = [];
@@ -415,21 +422,21 @@ function cardHTML(card, index, total) {
       await page.goto(`file://${temporaryFile}`, { waitUntil: 'networkidle' });
       await page.waitForTimeout(120);
 
-      for (let pass = 0; pass < 8; pass += 1) {
-        const overflows = await page.evaluate(() => [...document.querySelectorAll('.fitbody')].map(element => ({
-          overflow: element.scrollHeight - element.clientHeight,
-          size: parseFloat(element.style.fontSize) || 0
-        })));
-        if (!overflows.some(item => item.overflow > 0)) break;
-        for (const item of overflows.filter(item => item.overflow > 0)) {
-          const nextSize = Math.max(20, Math.floor((item.size * Math.min(.96, 1 - item.overflow / 2600)) * 10) / 10);
-          if (nextSize < item.size) {
-            await page.evaluate(({ from, to }) => {
-              const element = [...document.querySelectorAll('.fitbody')].find(node => parseFloat(node.style.fontSize) === from);
-              if (element) element.style.fontSize = `${to}px`;
-            }, { from: item.size, to: nextSize });
+      for (let pass = 0; pass < 24; pass += 1) {
+        const changed = await page.evaluate(() => {
+          let changed = false;
+          for (const element of document.querySelectorAll('.fitbody')) {
+            if (element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1) continue;
+            const size = parseFloat(element.style.fontSize) || 0;
+            const nextSize = Math.max(20, Math.floor(size * .96 * 10) / 10);
+            if (nextSize < size) {
+              element.style.fontSize = `${nextSize}px`;
+              changed = true;
+            }
           }
-        }
+          return changed;
+        });
+        if (!changed) break;
         await page.waitForTimeout(60);
       }
 
@@ -437,7 +444,8 @@ function cardHTML(card, index, total) {
         title: Boolean(document.querySelector('.title')),
         footer: Boolean(document.querySelector('.footer')),
         badImages: [...document.querySelectorAll('img')].filter(img => !img.complete || img.naturalWidth === 0).length,
-        overflow: [...document.querySelectorAll('.fitbody')].map(element => element.scrollHeight - element.clientHeight),
+        overflow: [...document.querySelectorAll('.fitbody')].map(element => Math.max(
+          element.scrollHeight - element.clientHeight, element.scrollWidth - element.clientWidth)),
         layout: document.body.dataset.layout || 'unknown',
         sourceParagraphs: [...document.querySelectorAll('[data-source-paragraph]')]
           .sort((a, b) => Number(a.dataset.sourceParagraph) - Number(b.dataset.sourceParagraph))
@@ -447,10 +455,11 @@ function cardHTML(card, index, total) {
           return r.left < 0 || r.right > 1243 || r.top < 0 || r.bottom > 1550;
         }).length
       }));
-      if (magazine && (JSON.stringify(audit.sourceParagraphs) !== JSON.stringify(report.cards[shotIndex].points) || audit.clippedCopy)) {
+      audit.copyIssues = await page.evaluate(auditCopy, { checkImages: !magazine });
+      if ((magazine || report.cards[shotIndex].visual) && (JSON.stringify(audit.sourceParagraphs) !== JSON.stringify(report.cards[shotIndex].points) || audit.clippedCopy)) {
         throw new Error(`${name}: missing or clipped source copy ${JSON.stringify(audit)}`);
       }
-      if (!audit.title || !audit.footer || audit.badImages || audit.overflow.some(value => value > 0)) {
+      if (!audit.title || !audit.footer || audit.badImages || audit.overflow.some(value => value > 6) || audit.copyIssues.length) {
         throw new Error(`${name}: ${JSON.stringify(audit)}`);
       }
       await page.screenshot({ path: outputFile, clip: { x: 0, y: 0, width: 1242, height: 1656 } });

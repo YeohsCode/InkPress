@@ -1,0 +1,104 @@
+"""Evidence contracts for figures; semantic source review remains editorial work."""
+import datetime
+import math
+import re
+
+
+def validate_dates(report):
+    value = report.get("date", "")
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError
+        datetime.date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return ["[date] 期号日期必须是有效的 YYYY-MM-DD"]
+    problems = []
+    kicker = report.get("cover", {}).get("kicker", "")
+    for year, month, day in re.findall(r"(\d{4})[.年/-](\d{1,2})[.月/-](\d{1,2})日?", kicker):
+        if f"{year}-{int(month):02}-{int(day):02}" != value:
+            problems.append("[cover.kicker] 刊头日期与 report.date 不一致")
+    return problems
+
+
+def validate_visuals(report):
+    problems = []
+    urls = set()
+    for ref in report.get("references", []):
+        urls.update(re.findall(r"https?://[^\s<>\"）)]+", ref.get("url", "") if isinstance(ref, dict) else str(ref)))
+    for ci, card in enumerate(report.get("cards", [])):
+        prefix = f"[cards[{ci}].visual]"
+        visual = card.get("visual")
+        image = card.get("design", {}).get("figure") or card.get("image")
+        if not visual:
+            if image:
+                problems.append(f"{prefix} 配图缺证据说明：需 kind、source_url、caption、evidence")
+            continue
+        if not isinstance(visual, dict):
+            problems.append(f"{prefix} 必须是对象")
+            continue
+        kind = visual.get("kind")
+        if kind not in {"bars", "diagram", "source_chart", "photo"}:
+            problems.append(f"{prefix} 未知 kind")
+        if visual.get("source_url") not in urls:
+            problems.append(f"{prefix} source_url 必须对应 references 中的原文链接")
+        if not isinstance(visual.get("caption"), str) or not visual["caption"].strip():
+            problems.append(f"{prefix} 缺可见图注 caption")
+        copy = "\n".join([card.get("title", ""), *card.get("points", [])])
+
+        def evidence(item, where):
+            excerpt = item.get("evidence")
+            if not isinstance(excerpt, str) or not excerpt.strip() or excerpt not in copy:
+                problems.append(f"{prefix} {where} evidence 必须逐字对应本页正文")
+                return ""
+            return excerpt
+
+        evidence(visual, "")
+        if card.get("content_type") == "data" and kind not in {"bars", "source_chart"}:
+            problems.append(f"{prefix} 数据页必须使用数据图或原始图表")
+        if kind in {"source_chart", "photo"} and not image:
+            problems.append(f"{prefix} 原图/照片缺 image 或 design.figure")
+        if kind in {"bars", "diagram"} and image:
+            problems.append(f"{prefix} 自绘图不得同时指定外部 image/design.figure")
+        if kind == "photo" and "示意" not in visual.get("caption", ""):
+            problems.append(f"{prefix} 照片图注必须标明示意")
+        if kind == "bars":
+            panels = visual.get("panels")
+            if not isinstance(panels, list) or not 1 <= len(panels) <= 3:
+                problems.append(f"{prefix} bars 需要 1–3 组 panels")
+                continue
+            for pi, panel in enumerate(panels):
+                if not isinstance(panel, dict):
+                    problems.append(f"{prefix} panel 必须是对象")
+                    continue
+                rows = panel.get("rows")
+                if not panel.get("title") or not panel.get("unit") or not isinstance(rows, list) or not 1 <= len(rows) <= 8:
+                    problems.append(f"{prefix} panel 需 title、unit 和 1–8 行 rows")
+                    continue
+                for ri, row in enumerate(rows):
+                    if not isinstance(row, dict):
+                        problems.append(f"{prefix} row 必须是对象")
+                        continue
+                    excerpt = evidence(row, f"panels[{pi}].rows[{ri}]").replace(",", "")
+                    if not row.get("label"):
+                        problems.append(f"{prefix} row 缺 label")
+                    for field in ("value", "max_value"):
+                        if field == "max_value" and field not in row:
+                            continue
+                        number = row.get(field)
+                        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or number < 0:
+                            problems.append(f"{prefix} {field} 必须为非负有限数字")
+                        elif not re.search(rf"(?<![\d.]){re.escape(f'{number:g}')}(?![\d.])", excerpt):
+                            problems.append(f"{prefix} {field}={number} 未出现在本行正文证据中")
+                    if isinstance(row.get("max_value"), (int, float)) and isinstance(row.get("value"), (int, float)) and row["max_value"] < row["value"]:
+                        problems.append(f"{prefix} max_value 不能小于 value")
+        if kind == "diagram":
+            nodes = visual.get("nodes")
+            if not isinstance(nodes, list) or not 2 <= len(nodes) <= 5:
+                problems.append(f"{prefix} diagram 需要 2–5 个 nodes")
+                continue
+            for node in nodes:
+                if not isinstance(node, dict) or not node.get("label"):
+                    problems.append(f"{prefix} node 必须含 label")
+                    continue
+                evidence(node, "node")
+    return problems

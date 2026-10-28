@@ -17,6 +17,8 @@ import os
 import re
 import sys
 
+from pipeline.core.validate_visuals import validate_dates, validate_visuals
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── 硬禁格式（regex，命中即违规）────────────────────────────────────────
@@ -56,6 +58,10 @@ HARD_BANS = [
      "指路式/求互动结尾（carousel 禁指路式结尾）"),
     (r"(?:你可以|建议你|先学会|记住：|学会问)|鉴定动作|验证方法[一二三]|收束[:：]",
      "教学式收尾/收束段/对读者喊话（2026-09-24 用户痛批，禁说教）"),
+    # 2026-10-28 复盘：卡片图里出现「（见文末）」却无处可看。
+    # 图片版式不渲染 references，这类标记在图上是死链，一律禁。
+    (r"(?:[详参]\s*)?见\s*(?:文\s*末|文章末尾|参考资料)",
+     "「见文末」式悬空引用标记（图片不渲染 references，标记指向不存在的内容）"),
 ]
 
 # 收藏类文案允许的提示词（若命中上条“收藏起来”但属于以上短语则仍禁）
@@ -82,10 +88,25 @@ def _iter_fields(report):
                 yield f"cards[{ci}].{field}", card[field]
         for pi, p in enumerate(card.get("points", [])):
             yield f"cards[{ci}].points[{pi}]", p
+        for field in ("visual", "design"):
+            yield from _figure_fields(card.get(field, {}), f"cards[{ci}].{field}")
+
+
+def _figure_fields(value, path):
+    """Check figure labels/captions too, excluding hidden provenance and paths."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key not in {"evidence", "source_url", "kind", "layout", "figure"}:
+                yield from _figure_fields(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            yield from _figure_fields(item, f"{path}[{i}]")
+    elif isinstance(value, str):
+        yield path, value
 
 
 def validate(report):
-    problems = []
+    problems = validate_dates(report) + validate_visuals(report)
     for where, text in _iter_fields(report):
         if not ".points[" in where and REMOVED_HEADING.search(text):
             problems.append(f"[{where}] 已删除的读者关系页/行动建议页（含换名标题）: 「{text}」")
@@ -103,15 +124,10 @@ def validate(report):
             if not re.search(r"https?://", str(ref)):
                 problems.append(f"[references[{ri}]] 缺链接（参考资料必须带原文 URL）")
 
-    # 配图校验：至少 4 张 cards 配 card.image（无图的 card 由渲染器走纯文字版式）
+    # 允许无图；配图数量不能代替相关性。证据契约由 validate_visuals 校验。
     cards = report.get("cards", [])
-    n_img = sum(1 for c in cards if c.get("image"))
-    if len(cards) >= 6 and n_img < 4:
-        problems.append(
-            f"[report] 配图不足：{len(cards)} 张 cards 只有 {n_img} 张配 card.image，要求至少 4 张"
-        )
     for ci, c in enumerate(cards):
-        img = c.get("image")
+        img = c.get("design", {}).get("figure") or c.get("image")
         if img and not (str(img).startswith("http") or os.path.exists(str(img))):
             problems.append(f"[cards[{ci}].image] 配图 URL 无法确认/本地路径不存在: {img}")
 
@@ -158,7 +174,7 @@ def main():
         for p in problems:
             print(" -", p)
         sys.exit(1)
-    print("PASS 文案校验通过（无禁用格式/话术，references 已配）")
+    print("PASS 文案、期号日期与配图证据校验通过")
 
 
 if __name__ == "__main__":
