@@ -5,21 +5,39 @@ const fs = require('fs');
 const { createHash } = require('crypto');
 const { magazineHTML } = require('./magazine_layouts');
 const { mastheadTitle, issueDateLabel } = require('./publication');
-const { auditCopy } = require('./render_audit');
+const { auditCopy, auditFigures } = require('./render_audit');
 const { evidenceHTML } = require('./evidence_visuals');
+const { textHTML, fitCopy } = require('./text_layout');
+const { editorialHTML } = require('./editorial_layouts');
+const { pathToFileURL } = require('url');
 const { chromium } = require(path.join('/Users/andrewyeoh/Werk/HermesAgent/code/node_modules/playwright'));
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const reportPath = process.argv[2] || path.join(ROOT, 'data', 'report.json');
+const argv = process.argv.slice(2);
+const outputOption = argv.indexOf('--out-dir');
+if (outputOption !== -1 && !argv[outputOption + 1]) throw new Error('--out-dir requires a directory');
+const outputOverride = outputOption === -1 ? null : argv.splice(outputOption, 2)[1];
+const reportPath = path.resolve(argv[0] || path.join(ROOT, 'data', 'report.json'));
 // 渲染前强制校验，避免定时写稿跳过独立校验步骤后仍然出图。
 const { execFileSync } = require('child_process');
 execFileSync(process.env.PYTHON || 'python3', ['-m', 'pipeline.core.validate_text', reportPath],
   { cwd: ROOT, stdio: 'inherit' });
-const OUT_DIR = path.join(ROOT, 'data', 'images', 'html');
-fs.mkdirSync(OUT_DIR, { recursive: true });
+const OUT_DIR = path.resolve(outputOverride || path.join(ROOT, 'data', 'images', 'html'));
+fs.mkdirSync(path.dirname(OUT_DIR), { recursive: true });
 
 const reportBytes = fs.readFileSync(reportPath);
 const report = JSON.parse(reportBytes.toString('utf8'));
+// HTML lives in the output directory; local asset paths are relative to the report
+// (or repository for existing reports), never relative to generated HTML.
+for (const card of report.cards) {
+  const owner = card.design?.figure ? card.design : card;
+  const key = card.design?.figure ? 'figure' : 'image';
+  if (owner[key] && !/^https?:/i.test(owner[key])) {
+    const adjacent = path.resolve(path.dirname(reportPath), owner[key]);
+    const file = fs.existsSync(adjacent) ? adjacent : path.resolve(ROOT, owner[key]);
+    owner[key] = pathToFileURL(file).href;
+  }
+}
 const THEME = report.theme || {};
 const ACCENT = THEME.accent || '#C8442A';
 const ACCENT2 = THEME.accent2 || '#1F5F7A';
@@ -400,11 +418,20 @@ function cardHTML(card, index, total) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
+  const lock = `${OUT_DIR}.lock`;
+  const lockFd = fs.openSync(lock, 'wx');
+  const stage = fs.mkdtempSync(`${OUT_DIR}.staging-`);
+  let browser;
+  try {
+  browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--font-render-hinting=none'] });
   const page = await browser.newPage({ viewport: { width: 1242, height: 1656 }, deviceScaleFactor: 2 });
   const magazine = report.design?.style === 'magazine';
-  const renderCard = (card, index) => card.visual
+  const editorial = report.design?.style === 'editorial';
+  const renderCard = (card, index) => editorial
+    ? editorialHTML(report, card, index, report.cards.length)
+    : card.visual
     ? evidenceHTML(report, card, index, report.cards.length)
+    : !card.image && !card.design?.figure ? textHTML(report, card, index, report.cards.length)
     : magazine ? magazineHTML(report, card, index, report.cards.length)
     : index === 1 ? coverFirstHTML(card, index, report.cards.length) : cardHTML(card, index, report.cards.length);
   const shots = [['cover', renderCard(report.cards[0], 1)]];
@@ -415,12 +442,16 @@ function cardHTML(card, index, total) {
 
   const failures = [];
   for (const [shotIndex, [name, html]] of shots.entries()) {
-    const outputFile = path.join(OUT_DIR, `${name}.png`);
+    const outputFile = path.join(stage, `${name}.png`);
     try {
-      const temporaryFile = path.join(OUT_DIR, `${name}.html`);
+      const temporaryFile = path.join(stage, `${name}.html`);
       fs.writeFileSync(temporaryFile, html);
-      await page.goto(`file://${temporaryFile}`, { waitUntil: 'networkidle' });
-      await page.waitForTimeout(120);
+      await page.goto(pathToFileURL(temporaryFile).href, { waitUntil: 'networkidle' });
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        await Promise.all([...document.images].map(img => img.decode().catch(() => {})));
+      });
+      await page.evaluate(fitCopy);
 
       for (let pass = 0; pass < 24; pass += 1) {
         const changed = await page.evaluate(() => {
@@ -428,7 +459,8 @@ function cardHTML(card, index, total) {
           for (const element of document.querySelectorAll('.fitbody')) {
             if (element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1) continue;
             const size = parseFloat(element.style.fontSize) || 0;
-            const nextSize = Math.max(20, Math.floor(size * .96 * 10) / 10);
+            const minimum = Number(element.dataset.fitMin) || 20;
+            const nextSize = Math.max(minimum, Math.floor(size * .96 * 10) / 10);
             if (nextSize < size) {
               element.style.fontSize = `${nextSize}px`;
               changed = true;
@@ -455,11 +487,17 @@ function cardHTML(card, index, total) {
           return r.left < 0 || r.right > 1243 || r.top < 0 || r.bottom > 1550;
         }).length
       }));
-      audit.copyIssues = await page.evaluate(auditCopy, { checkImages: !magazine });
-      if ((magazine || report.cards[shotIndex].visual) && (JSON.stringify(audit.sourceParagraphs) !== JSON.stringify(report.cards[shotIndex].points) || audit.clippedCopy)) {
+      const card = report.cards[shotIndex];
+      const artOverlay = editorial && ['illustration', 'photo'].includes(card.visual?.kind) && card.design?.layout === 'cover';
+      audit.copyIssues = await page.evaluate(auditCopy, { checkImages: !magazine && !artOverlay });
+      audit.figureIssues = await page.evaluate(auditFigures, {
+        images: card.image || card.design?.figure ? 1 : 0,
+        visuals: card.visual && !(editorial && card.visual.kind === 'illustration') && !artOverlay ? 1 : 0
+      });
+      if ((editorial || magazine || card.visual || audit.layout === 'text') && (JSON.stringify(audit.sourceParagraphs) !== JSON.stringify(card.points) || audit.clippedCopy)) {
         throw new Error(`${name}: missing or clipped source copy ${JSON.stringify(audit)}`);
       }
-      if (!audit.title || !audit.footer || audit.badImages || audit.overflow.some(value => value > 6) || audit.copyIssues.length) {
+      if (!audit.title || !audit.footer || audit.badImages || audit.figureIssues.length || audit.overflow.some(value => value > 6) || audit.copyIssues.length) {
         throw new Error(`${name}: ${JSON.stringify(audit)}`);
       }
       await page.screenshot({ path: outputFile, clip: { x: 0, y: 0, width: 1242, height: 1656 } });
@@ -469,14 +507,32 @@ function cardHTML(card, index, total) {
       console.error(`SKIP ${error.message}`);
     }
   }
-  await browser.close();
-  if (failures.length) process.exit(1);
+  if (failures.length) throw new Error(`Rendering failed for ${failures.length} page(s); previous issue preserved`);
+  if (!fs.readFileSync(reportPath).equals(reportBytes)) throw new Error('Report changed during rendering; retry');
   const sha256 = data => createHash('sha256').update(data).digest('hex');
-  fs.writeFileSync(path.join(OUT_DIR, 'manifest.json'), JSON.stringify({
+  fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify({
     date: report.date,
     report_sha256: sha256(reportBytes),
     images: shots.map(([name]) => ({
-      name: `${name}.png`, sha256: sha256(fs.readFileSync(path.join(OUT_DIR, `${name}.png`)))
+      name: `${name}.png`, sha256: sha256(fs.readFileSync(path.join(stage, `${name}.png`)))
     }))
   }, null, 2));
-})();
+  const previous = `${stage}.previous`;
+  const hadPrevious = fs.existsSync(OUT_DIR);
+  if (hadPrevious) fs.renameSync(OUT_DIR, previous);
+  try { fs.renameSync(stage, OUT_DIR); }
+  catch (error) {
+    if (hadPrevious) fs.renameSync(previous, OUT_DIR);
+    throw error;
+  }
+  if (hadPrevious) fs.rmSync(previous, { recursive: true });
+  console.log(`PASS ${shots.length} pages published to ${OUT_DIR}`);
+  } finally {
+    try { if (browser) await browser.close(); }
+    finally {
+      fs.rmSync(stage, { recursive: true, force: true });
+      fs.closeSync(lockFd);
+      fs.unlinkSync(lock);
+    }
+  }
+})().catch(error => { console.error(error.message); process.exitCode = 1; });

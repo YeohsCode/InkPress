@@ -4,6 +4,18 @@ import math
 import re
 
 
+def number_in_evidence(number, excerpt, unit):
+    """Keep natural Chinese copy while checking the chart's explicit unit conversion."""
+    if re.search(rf"(?<![\d.]){re.escape(f'{number:g}')}(?![\d.])", excerpt):
+        return True
+    if unit == "百万次训练样本":
+        for scale, suffix in ((100, "万"), (0.01, "亿")):
+            value = f"{number * scale:.10g}"
+            if re.search(rf"(?<![\d.]){re.escape(value)}\s*{suffix}\s*次\s*(?:训练\s*)?样本", excerpt):
+                return True
+    return False
+
+
 def validate_dates(report):
     value = report.get("date", "")
     try:
@@ -37,7 +49,7 @@ def validate_visuals(report):
             problems.append(f"{prefix} 必须是对象")
             continue
         kind = visual.get("kind")
-        if kind not in {"bars", "diagram", "source_chart", "photo"}:
+        if kind not in {"bars", "diagram", "source_chart", "photo", "illustration"}:
             problems.append(f"{prefix} 未知 kind")
         if visual.get("source_url") not in urls:
             problems.append(f"{prefix} source_url 必须对应 references 中的原文链接")
@@ -55,12 +67,20 @@ def validate_visuals(report):
         evidence(visual, "")
         if card.get("content_type") == "data" and kind not in {"bars", "source_chart"}:
             problems.append(f"{prefix} 数据页必须使用数据图或原始图表")
-        if kind in {"source_chart", "photo"} and not image:
+        if kind in {"source_chart", "photo", "illustration"} and not image:
             problems.append(f"{prefix} 原图/照片缺 image 或 design.figure")
         if kind in {"bars", "diagram"} and image:
             problems.append(f"{prefix} 自绘图不得同时指定外部 image/design.figure")
         if kind == "photo" and "示意" not in visual.get("caption", ""):
             problems.append(f"{prefix} 照片图注必须标明示意")
+        if kind == "illustration":
+            if "插画" not in visual.get("caption", ""):
+                problems.append(f"{prefix} 概念插画图注必须标明插画，不能冒充实证图表")
+            if report.get("design", {}).get("style") != "editorial":
+                problems.append(f"{prefix} 概念插画使用 editorial 版式")
+        if kind == "diagram" and report.get("design", {}).get("style") == "editorial":
+            if visual.get("layout") not in {None, "maps", "constellation", "views"}:
+                problems.append(f"{prefix} 未知示意图 layout")
         if kind == "bars":
             panels = visual.get("panels")
             if not isinstance(panels, list) or not 1 <= len(panels) <= 3:
@@ -87,7 +107,7 @@ def validate_visuals(report):
                         number = row.get(field)
                         if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or number < 0:
                             problems.append(f"{prefix} {field} 必须为非负有限数字")
-                        elif not re.search(rf"(?<![\d.]){re.escape(f'{number:g}')}(?![\d.])", excerpt):
+                        elif not number_in_evidence(number, excerpt, panel.get("unit")):
                             problems.append(f"{prefix} {field}={number} 未出现在本行正文证据中")
                     if isinstance(row.get("max_value"), (int, float)) and isinstance(row.get("value"), (int, float)) and row["max_value"] < row["value"]:
                         problems.append(f"{prefix} max_value 不能小于 value")
@@ -96,6 +116,8 @@ def validate_visuals(report):
             if not isinstance(nodes, list) or not 2 <= len(nodes) <= 5:
                 problems.append(f"{prefix} diagram 需要 2–5 个 nodes")
                 continue
+            if visual.get("layout") == "views" and len(nodes) != 3:
+                problems.append(f"{prefix} views 示意需要两个描述与一个共同场景，共3个 nodes")
             for node in nodes:
                 if not isinstance(node, dict) or not node.get("label"):
                     problems.append(f"{prefix} node 必须含 label")

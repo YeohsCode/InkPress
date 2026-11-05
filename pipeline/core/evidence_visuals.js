@@ -72,7 +72,7 @@ function evidenceHTML(report, card, index, total) {
     <main><header><div class="kicker">${esc(card.tag)}${isCover ? `<br>${esc(issueDateLabel(report.date))}` : ''}</div><h1 class="title">${title}</h1></header>
       <figure class="visual ${esc(kind)}" data-evidence-visual>${figure}</figure>
       <div class="caption">${esc(visual.caption)}<br><span class="source">来源：${esc(visual.source_url)}</span></div>
-      <div class="body fitbody" style="font-size:30px">${card.points.map((p,i) => `<p data-source-paragraph="${i}">${esc(p)}</p>`).join('')}</div>
+      <div class="body fitbody" data-fit-max="42" style="font-size:30px">${card.points.map((p,i) => `<p data-source-paragraph="${i}">${esc(p)}</p>`).join('')}</div>
     </main><div class="footer"><span>${esc(card.title)}</span><span>${String(index).padStart(2,'0')} / ${String(total).padStart(2,'0')}</span></div>
   </body></html>`;
 }

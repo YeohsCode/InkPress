@@ -105,7 +105,7 @@ def _figure_fields(value, path):
         yield path, value
 
 
-def validate(report):
+def validate(report, asset_base=None):
     problems = validate_dates(report) + validate_visuals(report)
     for where, text in _iter_fields(report):
         if not ".points[" in where and REMOVED_HEADING.search(text):
@@ -128,7 +128,9 @@ def validate(report):
     cards = report.get("cards", [])
     for ci, c in enumerate(cards):
         img = c.get("design", {}).get("figure") or c.get("image")
-        if img and not (str(img).startswith("http") or os.path.exists(str(img))):
+        if img and not (str(img).startswith("http") or
+                        os.path.exists(os.path.join(asset_base or ROOT, str(img))) or
+                        os.path.exists(os.path.join(ROOT, str(img)))):
             problems.append(f"[cards[{ci}].image] 配图 URL 无法确认/本地路径不存在: {img}")
 
     # 标题数字一致性：标题里的中文/阿拉伯数字若指向"验证步骤/方法/动作"数量，
@@ -158,7 +160,7 @@ def load_valid_report(path):
     """Load copy for delivery and reject removed columns before any external calls."""
     with open(path, encoding="utf-8") as f:
         report = json.load(f)
-    problems = validate(report)
+    problems = validate(report, os.path.dirname(os.path.abspath(path)))
     if problems:
         raise ValueError("文案校验失败，停止投递：\n" + "\n".join(problems))
     return report
@@ -168,7 +170,7 @@ def main():
     path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "data", "report.json")
     with open(path, encoding="utf-8") as f:
         report = json.load(f)
-    problems = validate(report)
+    problems = validate(report, os.path.dirname(os.path.abspath(path)))
     if problems:
         print(f"FAIL {len(problems)} 处违规：")
         for p in problems:

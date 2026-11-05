@@ -22,6 +22,38 @@ class VisualEvidenceTest(unittest.TestCase):
         self.report["cards"] *= 9
         self.assertEqual([], validate(self.report))
 
+    def test_editorial_illustration_is_distinct_from_data_evidence(self):
+        report = copy.deepcopy(self.report)
+        report['design'] = {'style': 'editorial'}
+        card = report['cards'][0]
+        card.pop('content_type')
+        card['image'] = 'https://example.com/illustration.png'
+        card['visual'] = dict(kind='illustration', source_url='https://example.com/source',
+                              caption='AI 概念插画', evidence='8月427次')
+        self.assertEqual([], validate(report))
+        card['content_type'] = 'data'
+        self.assertTrue(any('数据页必须' in p for p in validate(report)))
+        card.pop('content_type')
+        card['visual']['caption'] = '这是真实实验结果'
+        self.assertTrue(any('插画' in p for p in validate(report)))
+
+    def test_chart_unit_conversion_does_not_force_awkward_copy(self):
+        card = self.report['cards'][0]
+        card['points'] = ['新方法用2160万次训练样本，另一方法用9亿次样本。']
+        card['visual'] = dict(kind='bars', source_url='https://example.com/source',
+            caption='统一换算为百万次训练样本。', evidence=card['points'][0],
+            panels=[dict(title='样本数', unit='百万次训练样本', rows=[
+                dict(label='新方法', value=21.6, evidence='新方法用2160万次训练样本'),
+                dict(label='另一方法', value=900, evidence='另一方法用9亿次样本')])])
+        self.assertEqual([], validate(self.report))
+        card['visual']['panels'][0]['rows'][0]['value'] = 216
+        self.assertTrue(any('value=216' in p for p in validate(self.report)))
+        card['visual']['panels'][0]['rows'][0]['value'] = 21.6
+        card['points'][0] = card['points'][0].replace('2160万次训练样本', '2160万元')
+        card['visual']['evidence'] = card['points'][0]
+        card['visual']['panels'][0]['rows'][0]['evidence'] = '新方法用2160万元'
+        self.assertTrue(any('value=21.6' in p for p in validate(self.report)))
+
     def test_unreviewed_stock_image_and_design_override_are_blocked(self):
         for field in ("image", "design"):
             report = copy.deepcopy(self.report)

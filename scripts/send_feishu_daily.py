@@ -20,7 +20,7 @@ def digest(path):
 
 
 def full_text(report):
-    title = '，'.join(report['cover']['title_lines'])
+    title = ''.join(report['cover']['title_lines'])
     lines = [f"{report.get('series', 'AI 圈每天深读')} · {report['date']}｜{title}", '']
     for card in report['cards']:
         lines.extend([card['title'], *card['points'], ''])
@@ -57,7 +57,8 @@ def send(args, env):
             result = subprocess.run(['hermes', 'send', *args], capture_output=True,
                                     text=True, timeout=120, env=env)
             output = result.stdout + result.stderr
-            if result.returncode == 0 and re.search(r'\bsent\b', output, re.I):
+            if (result.returncode == 0 and re.search(r'\bsent\b', output, re.I)
+                    and not re.search(r'\bnot\s+sent\b', output, re.I)):
                 return output.strip()
             error = output.strip()[-500:]
         except subprocess.TimeoutExpired:
@@ -70,20 +71,28 @@ def send(args, env):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--report', type=Path, default=ROOT / 'data/report.json',
+                        help='Report to deliver; defaults to the current daily issue')
+    parser.add_argument('--image-dir', type=Path, default=ROOT / 'data/images/html',
+                        help='Image directory containing the matching manifest.json')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--images-only', action='store_true', help='Deliver a revised layout without repeating the article text')
     parser.add_argument('--pages', nargs='+', type=int, help='Deliver only these numbered image pages')
+    parser.add_argument('--delivery-id', help='Separate resumable delivery run for an explicit resend')
     args = parser.parse_args()
-    report, fingerprint, images = prepare(ROOT / 'data/report.json', ROOT / 'data/images/html')
+    if args.delivery_id and not re.fullmatch(r'[a-zA-Z0-9-]{1,64}', args.delivery_id):
+        parser.error('--delivery-id must contain 1–64 letters, digits or hyphens')
+    report_path, image_dir = args.report.resolve(), args.image_dir.resolve()
+    report, fingerprint, images = prepare(report_path, image_dir)
     chat = os.environ.get('FEISHU_DAILY_CHAT', 'feishu:oc_4f6f0ec40c6b9fb609ed619bfa60f659')
     if not chat.startswith('feishu:'):
         chat = 'feishu:' + chat
-    title = '，'.join(report['cover']['title_lines'])
+    title = ''.join(report['cover']['title_lines'])
     if args.pages is not None and any(number < 1 or number > len(images) for number in args.pages):
         parser.error(f'--pages must be between 1 and {len(images)}')
     selected_pages = set(args.pages) if args.pages is not None else set(range(1, len(images) + 1))
     items = [(f'img{i}', ['--to', chat, '-s', f'{i}/{len(images)} {title}',
-                         'MEDIA:' + str(ROOT / 'data/images/html' / name)])
+                         'MEDIA:' + str(image_dir / name)])
              for i, name in enumerate(images, 1) if i in selected_pages]
     if not args.images_only and args.pages is None:
         items.append(('text', ['--to', chat, '-s', f"{report['date']} 全文文案", full_text(report)]))
@@ -91,9 +100,10 @@ def main():
         print(f"PASS {report['date']}：{len(selected_pages)} 张图{' + 全文' if not args.images_only and args.pages is None else ''}；稿件、图片哈希一致")
         return
     receipt_dir = ROOT / 'data/delivery'
-    receipt_dir.mkdir(exist_ok=True)
+    receipt_dir.mkdir(parents=True, exist_ok=True)
     target_hash = hashlib.sha256(chat.encode()).hexdigest()[:12]
-    receipt_path = receipt_dir / f"{report['date']}-{fingerprint[:16]}-{target_hash}.json"
+    delivery_suffix = '-' + args.delivery_id if args.delivery_id else ''
+    receipt_path = receipt_dir / f"{report['date']}-{fingerprint[:16]}-{target_hash}{delivery_suffix}.json"
     receipts = json.loads(receipt_path.read_text()) if receipt_path.exists() else {
         'date': report['date'], 'report_sha256': fingerprint, 'chat': chat, 'sent': {}}
     env = {key: value for key, value in os.environ.items()

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import urllib.error
 
 from pipeline.sources.common import fetch
-from scripts.send_feishu_daily import digest, full_text, prepare, send
+from scripts.send_feishu_daily import digest, full_text, prepare, send, main
 
 
 class DailyRecoveryTest(unittest.TestCase):
@@ -71,6 +71,44 @@ class DailyRecoveryTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '状态不明'):
                 send([], {})
             self.assertEqual(run.call_count, 1)
+
+    def test_negative_success_output_is_not_a_receipt(self):
+        results = [subprocess.CompletedProcess([], 0, 'not sent', ''),
+                   subprocess.CompletedProcess([], 0, 'sent to feishu', '')]
+        with patch('scripts.send_feishu_daily.subprocess.run', side_effect=results), \
+                patch('scripts.send_feishu_daily.time.sleep'):
+            self.assertEqual(send([], {}), 'sent to feishu')
+
+    def test_archived_issue_uses_its_own_verified_images_and_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            issue = root / 'issues/topic'
+            images = issue / 'images'
+            images.mkdir(parents=True)
+            report_path = issue / 'report.json'
+            report_path.write_text(json.dumps({
+                'date': '2026-11-04', 'cover': {'title_lines': ['专题，', '第二版']},
+                'cards': [{'title': '原文事实', 'points': ['经过核实的事实。']}],
+                'references': ['https://example.com/source']}))
+            image = images / 'cover.png'
+            image.write_bytes(b'archived image')
+            (images / 'manifest.json').write_text(json.dumps({
+                'date': '2026-11-04', 'report_sha256': digest(report_path),
+                'images': [{'name': image.name, 'sha256': digest(image)}]}))
+            argv = ['sender', '--report', str(report_path), '--image-dir', str(images),
+                    '--delivery-id', 'editorial-v2']
+            with patch('scripts.send_feishu_daily.ROOT', root), \
+                    patch('sys.argv', argv), \
+                    patch('scripts.send_feishu_daily.send', return_value='sent') as deliver:
+                main()
+                self.assertEqual(deliver.call_count, 2)
+                self.assertIn('MEDIA:' + str(image.resolve()), deliver.call_args_list[0].args[0])
+                self.assertIn('1/1 专题，第二版', deliver.call_args_list[0].args[0])
+                main()
+                self.assertEqual(deliver.call_count, 2)  # Same issue resumes without duplicates.
+                receipts = list((root / 'data/delivery').glob('*editorial-v2.json'))
+                self.assertEqual(len(receipts), 1)
+                self.assertEqual(set(json.loads(receipts[0].read_text())['sent']), {'img1', 'text'})
 
 
 if __name__ == '__main__':
