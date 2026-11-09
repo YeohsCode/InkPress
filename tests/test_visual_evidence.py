@@ -102,6 +102,38 @@ class VisualEvidenceTest(unittest.TestCase):
                 with self.subTest(marker=marker, field=field):
                     self.assertTrue(any("悬空引用" in p for p in validate(report)))
 
+    def test_visual_layouts_cannot_publish_empty_figure_slots(self):
+        report = copy.deepcopy(self.report)
+        report['design'] = {'style': 'editorial'}
+        card = report['cards'][0]
+        card.pop('content_type', None)
+        for layout in ('atlas', 'maps', 'process', 'data', 'source', 'cover', 'plate', 'closing'):
+            card['design'] = {'layout': layout}
+            with self.subTest(layout=layout):
+                self.assertTrue(any('需要配图' in p for p in validate(report)))
+        card['design'] = {'layout': 'essay'}
+        self.assertEqual([], validate(report))  # An intentional text page is still supported.
+
+    def test_weekly_requires_visual_cover_and_explicit_page_plan(self):
+        report = copy.deepcopy(self.report)
+        report.update(edition='weekly', series="Yeoh's AI Weekly", design={'style': 'editorial'})
+        card = report['cards'][0]
+        card.pop('content_type', None)
+        card['design'] = {'layout': 'essay'}
+        self.assertTrue(any('周报首张' in p for p in validate(report)))
+        card['design'] = {'layout': 'cover'}
+        card['image'] = 'https://example.com/art.png'
+        card['visual'] = dict(kind='illustration', source_url='https://example.com/source',
+                              caption='封面概念插画', evidence='8月427次')
+        self.assertEqual([], validate(report))
+        card['visual']['kind'] = 'bars'
+        self.assertTrue(any('版式与' in p for p in validate(report)))
+        card['visual']['kind'] = 'illustration'
+        report['cards'].append(dict(title='事件背景', points=['经过核实的事实。']))
+        self.assertTrue(any('明确每页版式' in p for p in validate(report)))
+        report['cards'][-1]['design'] = {'layout': 'essay'}
+        self.assertEqual([], validate(report))
+
     def test_issue_date_is_valid_and_matches_the_cover(self):
         for value in (None, "2026-02-30", "2026-2-3", "yesterday"):
             self.report["date"] = value

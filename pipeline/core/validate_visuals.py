@@ -34,6 +34,17 @@ def validate_dates(report):
 
 def validate_visuals(report):
     problems = []
+    editorial = report.get("design", {}).get("style") == "editorial"
+    weekly = report.get("edition") == "weekly" or bool(re.search(r"\bweekly\b|周报|周刊", report.get("series", ""), re.I))
+    if weekly:
+        if not editorial:
+            problems.append("[design.style] 周报须使用 editorial 图文系统")
+        cards = report.get("cards", [])
+        if not cards or cards[0].get("design", {}).get("layout") != "cover":
+            problems.append("[cards[0].design.layout] 周报首张须为有主视觉的 cover，不能用普通正文页充当封面")
+        for ci, card in enumerate(cards):
+            if not card.get("design", {}).get("layout"):
+                problems.append(f"[cards[{ci}].design.layout] 周报需明确每页版式")
     urls = set()
     for ref in report.get("references", []):
         urls.update(re.findall(r"https?://[^\s<>\"）)]+", ref.get("url", "") if isinstance(ref, dict) else str(ref)))
@@ -41,6 +52,10 @@ def validate_visuals(report):
         prefix = f"[cards[{ci}].visual]"
         visual = card.get("visual")
         image = card.get("design", {}).get("figure") or card.get("image")
+        layout = card.get("design", {}).get("layout") if editorial else None
+        needs_visual = {"cover", "atlas", "plate", "maps", "process", "data", "source", "closing"}
+        if layout in needs_visual and not visual:
+            problems.append(f"{prefix} {layout} 版式需要配图，不能保留空白图栏；纯文字页请明确选择 essay")
         if not visual:
             if image:
                 problems.append(f"{prefix} 配图缺证据说明：需 kind、source_url、caption、evidence")
@@ -48,6 +63,12 @@ def validate_visuals(report):
         if not isinstance(visual, dict):
             problems.append(f"{prefix} 必须是对象")
             continue
+        allowed = {"cover": {"photo", "illustration"}, "maps": {"diagram"},
+                   "process": {"diagram"}, "data": {"bars", "source_chart"},
+                   "source": {"source_chart"}, "plate": {"photo", "illustration", "source_chart"},
+                   "closing": {"photo", "illustration", "source_chart"}, "essay": set()}
+        if layout in allowed and visual.get("kind") not in allowed[layout]:
+            problems.append(f"{prefix} {layout} 版式与 visual.kind 不匹配")
         kind = visual.get("kind")
         if kind not in {"bars", "diagram", "source_chart", "photo", "illustration"}:
             problems.append(f"{prefix} 未知 kind")
@@ -79,7 +100,7 @@ def validate_visuals(report):
             if report.get("design", {}).get("style") != "editorial":
                 problems.append(f"{prefix} 概念插画使用 editorial 版式")
         if kind == "diagram" and report.get("design", {}).get("style") == "editorial":
-            if visual.get("layout") not in {None, "maps", "constellation", "views"}:
+            if visual.get("layout") not in {None, "maps", "constellation", "views", "flow"}:
                 problems.append(f"{prefix} 未知示意图 layout")
         if kind == "bars":
             panels = visual.get("panels")

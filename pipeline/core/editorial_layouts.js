@@ -1,5 +1,6 @@
 /* Page roles, not one repeated column template. All copy stays in the report. */
 const { diagram,bars } = require('./editorial_figures');
+const { publicationTitle } = require('./publication');
 const esc = value=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const layouts=new Set(['cover','atlas','plate','maps','process','data','source','essay','closing']);
 const paragraph=(text,index,cls='')=>`<p class="source-copy ${cls}" data-source-paragraph="${index}">${esc(text)}</p>`;
@@ -27,7 +28,10 @@ function content(card,layout) {
     <section class="cover-copy">${copy(card,{max:31,min:29})}<div class="caption">${esc(card.visual.caption)}</div></section>`;
   if(layout==='closing') return `<main class="closing-main">${heading(card)}${copy(card,{max:37,min:33})}${figure(card)}</main>`;
   if(layout==='plate') return `<main class="spread-main plate-main">${heading(card)}${figure(card)}${copy(card,{max:35,min:32})}</main>`;
-  if(layout==='data') return `<main class="spread-main data-main">${heading(card)}<div class="data-display" data-audit-copy><strong>${esc(card.design?.feature?.value||'')}</strong><span>${esc(card.design?.feature?.label||'')}</span></div>${figure(card)}${copy(card,{max:33,min:30})}</main>`;
+  if(layout==='data') {
+    const feature = card.design?.feature?.value != null && String(card.design.feature.value).trim();
+    return `<main class="spread-main data-main ${feature?'with-feature':'without-feature'}">${heading(card)}${feature ? `<div class="data-display" data-audit-copy><strong>${esc(card.design.feature.value)}</strong><span>${esc(card.design.feature.label||'')}</span></div>` : ''}${figure(card)}${copy(card,{max:33,min:30})}</main>`;
+  }
   if(layout==='source') return `<main class="spread-main source-main">${heading(card)}${figure(card)}${copy(card,{max:33,min:30})}</main>`;
   if(layout==='essay') return `<main class="spread-main essay-main">${heading(card)}${copy(card,{end:1,cls:'essay-lead',max:44,min:40})}<div class="essay-rule"></div>${copy(card,{start:1,cls:'essay-rest',max:36,min:32})}</main>`;
   if(layout==='maps') return `<main class="spread-main maps-main">${heading(card)}${copy(card,{end:1,cls:'standfirst',max:36,min:33})}${figure(card)}${copy(card,{start:1,max:34,min:31})}</main>`;
@@ -61,13 +65,14 @@ function editorialHTML(report,card,index,total) {
     .source-main{gap:25px}.source-main .title{font-size:79px}.source-main .editorial-figure{height:710px;background:#FFF;padding:26px 24px 0}.source-main .figure-content{flex:1}.source-main .caption{padding:12px 0 15px;border-top:1px solid #DDD}
     .data-main{gap:22px}.data-main .title{font-size:79px}.data-display{height:310px;flex:none;display:flex;align-items:center;gap:44px;color:#DD623E}.data-display strong{font-family:"Avenir Next",sans-serif;font-weight:750;font-size:225px;line-height:1;letter-spacing:-12px}.data-display span{font-size:26px;max-width:340px;line-height:1.6;color:#4D6669}
     .data-main .editorial-figure{height:auto;margin:0 0 8px}.chart-heading{font-size:23px;display:flex;justify-content:space-between;margin-bottom:24px}.chart-heading span{color:#7E8C89;font-size:20px}.editorial-row{margin-bottom:27px}.row-heading{display:flex;justify-content:space-between;align-items:baseline;font-size:25px;margin-bottom:12px}.row-heading strong{font-family:"Avenir Next","PingFang SC",sans-serif;font-size:41px}.track{height:30px;background:#D9DDD2;position:relative}.bar{height:100%;background:#193E46}.bar.first{background:#DD623E}.range{position:absolute;top:0;height:100%;background:repeating-linear-gradient(90deg,#DD623E 0 3px,transparent 3px 6px)}.axis{display:flex;justify-content:space-between;font-size:18px;color:#798B85;margin-top:-10px;margin-bottom:22px}.axis span{font-size:19px}
+    .data-main.without-feature .editorial-figure{flex:1;min-height:400px;max-height:900px}.data-main.without-feature .figure-content{flex:1;display:flex;flex-direction:column;gap:24px}.data-main.without-feature .editorial-chart{flex:1;display:flex;flex-direction:column;justify-content:space-between;min-height:0}.data-main.without-feature .body{flex:none;margin-top:auto}.data-main.without-feature .track{height:44px}.data-main.without-feature .editorial-row{margin-bottom:12px}
     .essay-main{gap:40px}.essay-main header{padding-top:30px}.essay-main .title{font-size:108px}.essay-lead{flex:none;margin-top:45px;font-family:"Songti SC",serif;line-height:1.55;max-height:450px}.essay-rule{width:90px;height:5px;background:#DD623E;flex:none}.essay-rest{max-width:990px}
     .cover-art{position:absolute;inset:0}.cover-art img{width:100%;height:100%;display:block;object-fit:cover}.cover-gradient{position:absolute;inset:0;background:linear-gradient(180deg,#0D2635B8 0%,#0D2635A6 28%,transparent 49%,transparent 67%,#0C2635F0 90%)}
     .cover-main{position:absolute;top:150px;left:78px;right:78px}.cover-main .title{font-size:116px;line-height:1.08;letter-spacing:-3px}.cover-main .kicker{font-size:25px;margin-bottom:27px}.cover-subject{margin-top:22px;font-size:20px;letter-spacing:2px;color:#DDD5BC}
     .cover-copy{position:absolute;left:78px;right:78px;bottom:124px;display:flex;flex-direction:column;gap:20px;max-height:300px}.cover-copy .body{flex:none}.cover-copy .caption{font-size:19px;line-height:1.3}.cover-copy .body p+p{margin-top:15px}
     .closing-main{position:absolute;inset:150px 78px 122px;display:flex;flex-direction:column;gap:34px}.closing-main .title{font-size:100px}.closing-main .body{flex:1;max-width:1010px}.closing-main .editorial-figure{height:430px;margin:0 -78px -5px}.closing-main .figure-content{object-position:center 75%}.closing-main .caption{padding:0 78px}.closing-main .illustration img{object-position:center 65%}
   </style></head><body data-layout="editorial-${layout}" class="${dark?'dark':''}">
-    <div class="masthead"><span class="brand">YEOH’S · AI DAILY NEWS</span><span>${esc(report.date.replaceAll('-','.'))} / ${esc(report.design?.section || 'DAILY')}</span></div>
+    <div class="masthead"><span class="brand">${esc(publicationTitle(report))}</span><span>${esc(report.date.replaceAll('-','.'))} / ${esc(report.design?.section || (publicationTitle(report).includes('Weekly') ? 'WEEKLY' : 'DAILY'))}</span></div>
     ${content(card,layout)}<div class="footer"><span class="section-name">${esc(card.tag)}</span><span class="folio">${String(index).padStart(2,'0')} <span style="font-size:18px;opacity:.6">/ ${String(total).padStart(2,'0')}</span></span></div>
   </body></html>`;
 }

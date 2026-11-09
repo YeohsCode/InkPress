@@ -65,7 +65,23 @@ function bars(visual) {
   }).join('');
 }
 
+function flow(visual) {
+  const n = visual.nodes.length;
+  const H = 90 + n * 108;
+  let output = '';
+  visual.nodes.forEach((node, i) => {
+    const y = 30 + i * 108;
+    output += `<path d="M120 ${y}H960V${y + 78}H120Z" fill="#F8F0DE" stroke="#D7D3C5"/>`;
+    output += dot(150, y + 39, i === n - 1 ? '#DD623E' : '#193E46', 12);
+    output += label(185, y + 33, node.label, 30, '#193E46', 'start');
+    output += label(185, y + 66, node.detail || '', 22, '#5C6B67', 'start');
+    if (i < n - 1) output += `<path d="M540 ${y + 82}V${y + 100}" stroke="#DD623E" stroke-width="3" marker-end="url(#flow-arrow)"/>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 ${H}" role="img" aria-label="流程示意" style="width:100%;height:100%;font-family:'PingFang SC',sans-serif"><defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="none" stroke="#DD623E" stroke-width="1.5"/></marker></defs>${output}</svg>`;
+}
+
 function diagram(visual) {
+  if (visual.layout === 'flow') return flow(visual);
   if(visual.layout==='maps') return maps(visual);
   if(visual.layout==='constellation') return constellation(visual);
   if(visual.layout==='views') return views(visual);

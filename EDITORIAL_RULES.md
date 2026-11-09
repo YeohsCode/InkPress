@@ -36,3 +36,9 @@
 - 每期保留素材出处、作者/机构、许可或使用依据、署名要求及裁切记录；生成插画保存工具与提示词并在图注标明「插画」。原始科学图表保留出处，不能用插画替代证据。
 - 以上选择服务于报道，不设照片数量配额，也不以纯文字作为省略配图的默认方案。Daily job 的完整提示词存于 `config/hermes/content-daily.prompt.md`。
 - 专题投递用 `send_feishu_daily.py --report <report> --image-dir <images>`，独立核验 manifest 与哈希，避免覆盖或误发当日日报。逐条成功回执才算送达。
+
+2026-11-09：Daily / Weekly 同步与空栏防护。
+
+- 两种刊物共用当前渲染器、文字/图形校验和带回执的 send_feishu_daily.py。Weekly 独立放在 data/issues/<date>-weekly，不覆盖 Daily；完整任务配置见 config/hermes/content-weekly.prompt.md。
+- Weekly 设置 edition=weekly，并使用有主视觉的 cover 首卡；逐页声明版式。atlas/maps/process/data/source 等缺少 visual 会校验失败，纯文字页应明确 essay。data 页没设置 feature 时不保留主数字空区；刊头按 Daily / Weekly 区分。
+- 日常生产任务编辑本期稿件与素材；不能通过修改公共渲染器、校验器或 skill 迁就当前稿件。发现工具缺陷保留页面与报错，另行修复并回归验证。

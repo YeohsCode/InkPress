@@ -79,3 +79,53 @@ test('editorial figures do not inject a previous story into new topics',()=>{
   assert.doesNotMatch(rendered,/C1A678|飞盘|狗/);
   assert.doesNotMatch(bars({panels:[{title:'电量',unit:'千瓦时',rows:[{label:'一月',value:100}]}]}),/样本数量/);
 });
+
+
+test('weekly uses the shared editorial renderer with its own masthead and no empty data callout',async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'weekly-editorial-'));
+  const browser=await chromium.launch();
+  try {
+    fs.writeFileSync(path.join(root,'art.svg'),'<svg xmlns="http://www.w3.org/2000/svg" width="1242" height="1656"><rect width="1242" height="1656" fill="#12343c"/></svg>');
+    const source='https://example.com/source';
+    const report={date:'2026-11-07',edition:'weekly',series:"Yeoh's AI Weekly",design:{style:'editorial'},
+      cover:{title_lines:['本周事件'],kicker:'2026-11-07 · AI 周报'},references:[{url:source}],cards:[
+        {title:'本周事件',tag:'封面',points:['本周报道的共同线索。'],design:{layout:'cover'},image:'art.svg',
+          visual:{kind:'illustration',source_url:source,caption:'概念插画',evidence:'共同线索'}},
+        {title:'从扫描到复核',tag:'机制',points:['先扫描候选，再人工复核。'],design:{layout:'process'},
+          visual:{kind:'diagram',layout:'flow',source_url:source,caption:'流程示意',evidence:'先扫描候选',
+            nodes:[{label:'扫描候选',evidence:'扫描候选'},{label:'人工复核',evidence:'人工复核'}]}},
+        {title:'两次观测',tag:'数据',points:['第一次427次，第二次301次。'],design:{layout:'data'},
+          visual:{kind:'bars',source_url:source,caption:'按原文数字重绘',evidence:'第一次427次',
+            panels:[{title:'观测次数',unit:'次',rows:[{label:'第一次',value:427,evidence:'第一次427次'},
+              {label:'第二次',value:301,evidence:'第二次301次'}]}]}}
+      ]};
+    const input=path.join(root,'report.json'),output=path.join(root,'images');
+    fs.writeFileSync(input,JSON.stringify(report));
+    const result=spawnSync(process.execPath,['pipeline/core/render_html.js',input,'--out-dir',output],
+      {cwd:path.resolve(__dirname,'..'),encoding:'utf8',timeout:60000});
+    assert.equal(result.status,0,result.stdout+result.stderr);
+    const page=await browser.newPage({viewport:{width:1242,height:1656}});
+    for (const [i,name] of ['cover','info_02','info_03'].entries()) {
+      await page.goto(require('node:url').pathToFileURL(path.join(output,name+'.html')).href);
+      await page.evaluate(()=>document.fonts.ready);await page.evaluate(fitCopy);
+      assert.match(await page.locator('.brand').innerText(),/Weekly/);
+      assert.deepEqual(await page.locator('[data-source-paragraph]').allTextContents(),report.cards[i].points);
+      if (i===1) {
+        const positions=await page.locator('.editorial-figure svg text').evaluateAll(nodes=>nodes
+          .filter(n=>['扫描候选','人工复核'].includes(n.textContent))
+          .map(n=>({x:Number(n.getAttribute('x')),y:Number(n.getAttribute('y'))})));
+        assert.equal(positions.length,2);
+        assert.equal(positions[0].x,positions[1].x);
+        assert(positions[0].y<positions[1].y); // Flow steps progress down one column.
+      }
+    }
+    assert.equal(await page.locator('.data-display').count(),0);
+    const gap=await page.evaluate(()=>document.querySelector('figure').getBoundingClientRect().top-document.querySelector('header').getBoundingClientRect().bottom);
+    assert(gap<80,`data figure must follow its heading without an empty feature region: ${gap}`);
+    const regions=await page.evaluate(()=>({figure:document.querySelector('figure').getBoundingClientRect().height,
+      bodyBottom:document.querySelector('.body').getBoundingClientRect().bottom}));
+    assert(regions.figure>500,'the chart should use the available page height');
+    assert(regions.bodyBottom>1200,'copy and chart should occupy the page together');
+    assert.deepEqual(await page.evaluate(auditCopy),[]);
+  } finally {await browser.close();fs.rmSync(root,{recursive:true,force:true});}
+});

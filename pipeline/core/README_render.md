@@ -92,4 +92,11 @@ bars/diagram 不得另指定 image/figure。所有 visual 卡片采用独立的�
 校验通过后去掉 `--dry-run` 投递整套图片与全文。`--delivery-id <name>` 用于明确要求重发的独立批次；
 同一批次重跑仍跳过已有成功回执。不要用新 ID 绕过超时或状态不明的消息。
 
+
+Weekly 与 Daily 使用同一渲染器与发送器。周报建议设置 `edition: "weekly"`、`series: "Yeoh's AI Weekly"`；
+校验器也识别 series 中的 Weekly/周报/周刊。周报要求 editorial、明确的逐页 layout，以及有主视觉的 cover 首卡。
+atlas/maps/process/data/source 等图文页必须有对应 visual；纯文字页明确 essay。data 页可省略 design.feature，
+此时不会渲染空的主数字区域。刊头自动选择周报刊名。diagram 的 flow 用于有方向的顺序流程。
+周报独立输出至 `data/issues/<date>-weekly/`，发送用上述 --report / --image-dir，不调用固定12页的旧脚本。
+
 """
