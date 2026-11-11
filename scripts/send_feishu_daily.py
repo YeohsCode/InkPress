@@ -13,6 +13,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from pipeline.core.validate_text import load_valid_report
+from pipeline.core.layout_plan import archive_plan
 
 
 def digest(path):
@@ -117,6 +118,8 @@ def main():
         temporary.write_text(json.dumps(receipts, ensure_ascii=False, indent=2))
         temporary.replace(receipt_path)
         print(label, 'sent', flush=True)
+    if all(key in receipts['sent'] for key in [*[f'img{i}' for i in range(1, len(images)+1)], 'text']):
+        archive_plan(report, fingerprint, ROOT / 'data/layout-history')
     print('PASS 全部投递完成，回执：' + str(receipt_path))
 
 

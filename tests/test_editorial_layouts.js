@@ -129,3 +129,31 @@ test('weekly uses the shared editorial renderer with its own masthead and no emp
     assert.deepEqual(await page.evaluate(auditCopy),[]);
   } finally {await browser.close();fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('content compositions preserve paragraphs and figures without depending on page position',async()=>{
+  const browser=await chromium.launch();
+  try {
+    const page=await browser.newPage({viewport:{width:1242,height:1656}});
+    const image='data:image/svg+xml;base64,'+Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700"><rect width="1000" height="700" fill="#42666c"/></svg>').toString('base64');
+    const points=['调查从一次公开访问开始，随后核对账号权限与发布设置。','同一份内容在两种设置下有不同的访问结果。研究人员逐项检查公开链接，并保留原始记录。'.repeat(3),'权限变化需要结合具体发布流程理解。'.repeat(3)];
+    const cases=[['cover','framed','photo'],['plate','inset','photo'],['atlas','wide','photo'],
+      ['data','ledger','bars'],['process','rail','diagram'],['essay','plain'],['essay','columns']];
+    for(const [layout,variant,kind] of cases){
+      const card={title:'链接公开以后',tag:'调查',points:layout==='cover'?[points[0]]:points,design:{layout,variant}};
+      if(kind==='diagram')card.points=[points.join('').repeat(3).slice(0,100),points.join('').repeat(3).slice(0,110),points.join('').repeat(3).slice(0,93)];
+      if(layout==='essay'&&variant==='columns')card.points=[points.join('').repeat(3).slice(0,151),points[1],points[2]];
+      if(kind){card.visual={kind,caption:'调查素材与机制示意'};if(kind==='photo')card.image=image;}
+      if(kind==='bars')card.visual.panels=[{title:'两次核对',unit:'次',rows:[{label:'首次',value:40},{label:'再次',value:30}]}];
+      if(kind==='diagram')Object.assign(card.visual,{layout:'flow',nodes:[{label:'发布应用',detail:'确认发布设置'},{label:'产生查询',detail:'访问域名'},{label:'保留记录',detail:'公开查询结果'},{label:'复核权限',detail:'核对访问条件'}]});
+      await page.setContent(editorialHTML({date:'2026-11-11'},card,4,9));
+      await page.evaluate(()=>document.fonts.ready);await page.evaluate(fitCopy);
+      assert.deepEqual(await page.locator('[data-source-paragraph]').allTextContents(),card.points,`${layout}:${variant} copy`);
+      assert.deepEqual(await page.evaluate(auditCopy,{checkImages:layout!=='cover'}),[],`${layout}:${variant} copy audit`);
+      assert.deepEqual(await page.evaluate(auditFigures,{images:card.image?1:0,visuals:kind&&layout!=='cover'?1:0}),[],`${layout}:${variant} figure audit`);
+      const at4=await page.evaluate(()=>({layout:document.body.dataset.layout,variant:document.body.dataset.variant}));
+      await page.setContent(editorialHTML({date:'2026-11-11'},card,7,9));
+      assert.deepEqual(await page.evaluate(()=>({layout:document.body.dataset.layout,variant:document.body.dataset.variant})),at4);
+    }
+    assert.throws(()=>editorialHTML({date:'2026-11-11'},{title:'错误',points,design:{layout:'essay',variant:'rail'}},1,1),/Unknown essay variant/);
+  } finally {await browser.close();}
+});

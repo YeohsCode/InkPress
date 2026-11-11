@@ -1,4 +1,4 @@
-执行 Weekly AI News（2026-11-09 图文同步规范，周二/六版）。在任务 workdir 操作并使用 content-curation skill。本说明与项目当前规范覆盖 skill 中冲突的旧模板。
+执行 Weekly AI News（2026-11-11 内容编排规范，周二/六版）。在任务 workdir 操作并使用 content-curation skill。本说明与项目当前规范覆盖 skill 中冲突的旧模板。
 
 1. 读取与选题
 先读 EDITORIAL_RULES.md、pipeline/core/EDITORIAL_DESIGN.md、pipeline/core/README_render.md。与 Daily 共用当前 render_html.js、editorial_layouts.js、validate_text 和 send_feishu_daily.py，不另写固定页数的周报渲染器或发送器。
@@ -24,3 +24,6 @@
 最终仅汇报本期选题、真实校验与目视验收结果、各项投递状态。没有发送就不能说已送达。新闻成品留在 data/，不自动提交Git。
 
 工具故障时使用当前已注册能力；正文抽取失败可用 terminal 中 curl -fsSL --max-time 45 保存原文，Jina Reader作备选。未读到原文不编事实；视觉工具持续失败如实停止。状态以磁盘成品、退出码和实际回执为准。
+
+
+内容编排更新（2026-11-11）：执行前运行 python3 -m pipeline.core.layout_plan --recent weekly，读取当前稿与近三期同刊页面计划。先写连续文章，按本期论点分页，再设 design.planning_version=1；每页 design 必须填写 layout、variant、intent、rationale，具体选择遵照 pipeline/core/EDITORIAL_DESIGN.md 的构图表。页码不绑定内容类型，不默认 p4/p5 为数字/流程，不默认9页、每页3段。data 有 standard/ledger，process 有 standard/rail，essay 有 standard/plain/columns，cover 有 standard/framed，plate 有 standard/inset，atlas 有 standard/wide，其余 standard。variant 决定真实构图，不只换色。机制图明确 visual.layout；只有真实先后过程用 flow，不把通用 maps 的“两套坐标”画法复用到无关机制。process:rail 配 flow。完成页面计划后运行 python3 -m pipeline.core.layout_plan <report路径>，逐条复核 REVIEW 的同构和跨期重复，在 rationale 里说明本页材料为何需要这个构图；不是强制轮换，也不为变样而补图。检查整套节奏后再校验、渲染、目视验收和投递。完整成功投递自动保存本期编排历史，预览不记为送达。

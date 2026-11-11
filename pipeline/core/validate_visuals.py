@@ -33,7 +33,8 @@ def validate_dates(report):
 
 
 def validate_visuals(report):
-    problems = []
+    from .layout_plan import validate_plan
+    problems = validate_plan(report)
     editorial = report.get("design", {}).get("style") == "editorial"
     weekly = report.get("edition") == "weekly" or bool(re.search(r"\bweekly\b|周报|周刊", report.get("series", ""), re.I))
     if weekly:

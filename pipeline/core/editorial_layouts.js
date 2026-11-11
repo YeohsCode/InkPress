@@ -2,6 +2,7 @@
 const { diagram,bars } = require('./editorial_figures');
 const { publicationTitle } = require('./publication');
 const esc = value=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const variants=require('./editorial_variants.json');
 const layouts=new Set(['cover','atlas','plate','maps','process','data','source','essay','closing']);
 const paragraph=(text,index,cls='')=>`<p class="source-copy ${cls}" data-source-paragraph="${index}">${esc(text)}</p>`;
 function copy(card,{start=0,end=card.points.length,cls='',max=35,min=30}={}) {
@@ -17,12 +18,14 @@ function figure(card,cls='') {
   if(!v) return '';
   let inner;
   if(v.kind==='bars') inner=bars(v);
-  else if(v.kind==='diagram') inner=diagram(v);
+  else if(v.kind==='diagram') inner=diagram({...v,narrow:card.design?.variant==='rail'});
   else inner=`<img src="${esc(card.design?.figure||card.image)}" alt="${esc(v.caption)}">`;
   return `<figure class="editorial-figure ${esc(v.kind)} ${cls}" ${v.kind==='illustration'?'data-editorial-art':'data-evidence-visual'}><div class="figure-content">${inner}</div><figcaption class="caption">${esc(v.caption)}</figcaption></figure>`;
 }
 
-function content(card,layout) {
+function content(card,layout,variant) {
+  if(layout==='essay' && variant==='columns') return `<main class="spread-main essay-main">${heading(card)}${copy(card,{end:1,cls:'essay-deck',max:39,min:35})}${copy(card,{start:1,cls:'essay-columns',max:35,min:32})}</main>`;
+  if(layout==='essay' && variant==='plain') return `<main class="spread-main essay-main">${heading(card)}${copy(card,{max:39,min:34})}</main>`;
   if(layout==='cover') return `<figure class="cover-art" data-editorial-art><img data-art-background="true" src="${esc(card.design?.figure||card.image)}" alt="${esc(card.visual.caption)}"></figure><div class="cover-gradient"></div>
     <main class="cover-main">${heading(card)}${card.design?.subject ? `<div class="cover-subject" data-audit-copy>${esc(card.design.subject)}</div>` : ''}</main>
     <section class="cover-copy">${copy(card,{max:31,min:29})}<div class="caption">${esc(card.visual.caption)}</div></section>`;
@@ -44,6 +47,9 @@ function editorialHTML(report,card,index,total) {
   if(!layouts.has(layout)) throw new Error(`Unknown editorial layout: ${layout}`);
   if(['cover','closing','plate'].includes(layout) && (!card.image&&!card.design?.figure)) throw new Error(`${layout} requires an image`);
   if(layout==='cover' && !['illustration','photo'].includes(card.visual?.kind)) throw new Error('cover requires an illustration or photo; use source layout for evidence charts');
+  const variant=card.design?.variant || 'standard';
+  if(!variants[layout].includes(variant)) throw new Error(`Unknown ${layout} variant: ${variant}`);
+  if(variant==='rail' && card.visual?.layout!=='flow') throw new Error('process:rail requires an explicit flow diagram');
   const dark=['cover','closing'].includes(layout);
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     *{box-sizing:border-box;margin:0;padding:0}html,body{width:1242px;height:1656px}
@@ -71,9 +77,34 @@ function editorialHTML(report,card,index,total) {
     .cover-main{position:absolute;top:150px;left:78px;right:78px}.cover-main .title{font-size:116px;line-height:1.08;letter-spacing:-3px}.cover-main .kicker{font-size:25px;margin-bottom:27px}.cover-subject{margin-top:22px;font-size:20px;letter-spacing:2px;color:#DDD5BC}
     .cover-copy{position:absolute;left:78px;right:78px;bottom:124px;display:flex;flex-direction:column;gap:20px;max-height:300px}.cover-copy .body{flex:none}.cover-copy .caption{font-size:19px;line-height:1.3}.cover-copy .body p+p{margin-top:15px}
     .closing-main{position:absolute;inset:150px 78px 122px;display:flex;flex-direction:column;gap:34px}.closing-main .title{font-size:100px}.closing-main .body{flex:1;max-width:1010px}.closing-main .editorial-figure{height:430px;margin:0 -78px -5px}.closing-main .figure-content{object-position:center 75%}.closing-main .caption{padding:0 78px}.closing-main .illustration img{object-position:center 65%}
-  </style></head><body data-layout="editorial-${layout}" class="${dark?'dark':''}">
+    /* Composition choices change reading order and figure scale, never source copy. */
+    .variant-framed .cover-art{inset:600px 78px 370px}.variant-framed .cover-art img{object-fit:contain}
+    .variant-framed .cover-gradient{display:none}.variant-framed .cover-main .title{font-size:92px}
+    .variant-framed .cover-copy{max-height:245px}
+    .variant-wide .atlas-main{display:flex;gap:28px}.variant-wide .atlas-main .editorial-figure{flex:1;min-height:460px;max-height:760px;margin:0}
+    .variant-wide .atlas-main .body{flex:none;padding-top:0}.variant-wide .atlas-main .title{font-size:82px}
+    .variant-inset .plate-main .editorial-figure{margin:0;max-height:760px;min-height:360px}
+    .variant-inset .plate-main .caption{padding:0}.variant-inset .plate-main .figure-content{flex:1}
+    .variant-rail .process-main{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);grid-template-rows:auto minmax(0,1fr);gap:42px}
+    .variant-rail .process-main header{grid-column:1/-1}.variant-rail .process-main .editorial-figure{height:auto;margin:0;min-width:0;align-self:stretch}
+    .variant-rail .process-main .figure-content{flex:1}.variant-rail .process-main .body{align-self:stretch;height:100%;padding-top:24px}
+    .variant-ledger .data-main{gap:28px}.variant-ledger .data-main .title{font-size:92px}
+    .variant-ledger .data-main .editorial-figure{flex:none;min-height:0;max-height:none;margin:12px 0}
+    .variant-ledger .data-main .figure-content{display:block;flex:none;height:auto}
+    .variant-ledger .data-main .editorial-chart{display:block;flex:none;border-top:2px solid #193E46;padding-top:20px}
+    .variant-ledger .data-main .editorial-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:28px;border-bottom:1px solid #C7CEC2;margin:0;padding:22px 0}
+    .variant-ledger .data-main .row-heading{margin:0;gap:16px}.variant-ledger .data-main .row-heading strong{font-size:34px;white-space:nowrap}
+    .variant-ledger .data-main .track{height:22px}.variant-ledger .data-main .axis{margin:18px 0 0}
+    .variant-ledger .data-main .body{flex:1;margin-top:0}.variant-ledger .data-display{height:200px}.variant-ledger .data-display strong{font-size:150px;letter-spacing:-6px}
+    .variant-plain .essay-main{gap:48px}.variant-plain .essay-main .title{font-size:96px;max-width:1000px}
+    .variant-plain .essay-main .body{border-top:2px solid #A5B3A8;padding-top:36px;max-width:980px}
+    .variant-columns .essay-main{gap:36px}.variant-columns .essay-main .title{font-size:92px}
+    .essay-deck{flex:none;max-height:360px;color:#4F686C;font-family:"Songti SC",serif}
+    .essay-columns{column-count:2;column-gap:50px;column-rule:1px solid #C7CEC2;column-fill:balance;flex:1}
+    .essay-columns p{break-inside:avoid}
+  </style></head><body data-layout="editorial-${layout}" data-variant="${variant}" class="${dark?'dark':''} variant-${variant}">
     <div class="masthead"><span class="brand">${esc(publicationTitle(report))}</span><span>${esc(report.date.replaceAll('-','.'))} / ${esc(report.design?.section || (publicationTitle(report).includes('Weekly') ? 'WEEKLY' : 'DAILY'))}</span></div>
-    ${content(card,layout)}<div class="footer"><span class="section-name">${esc(card.tag)}</span><span class="folio">${String(index).padStart(2,'0')} <span style="font-size:18px;opacity:.6">/ ${String(total).padStart(2,'0')}</span></span></div>
+    ${content(card,layout,variant)}<div class="footer"><span class="section-name">${esc(card.tag)}</span><span class="folio">${String(index).padStart(2,'0')} <span style="font-size:18px;opacity:.6">/ ${String(total).padStart(2,'0')}</span></span></div>
   </body></html>`;
 }
 

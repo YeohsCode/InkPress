@@ -1,0 +1,11 @@
+{
+  "cover": ["standard", "framed"],
+  "atlas": ["standard", "wide"],
+  "plate": ["standard", "inset"],
+  "maps": ["standard"],
+  "process": ["standard", "rail"],
+  "data": ["standard", "ledger"],
+  "source": ["standard"],
+  "essay": ["standard", "plain", "columns"],
+  "closing": ["standard"]
+}

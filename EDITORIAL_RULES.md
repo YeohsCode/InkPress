@@ -42,3 +42,9 @@
 - 两种刊物共用当前渲染器、文字/图形校验和带回执的 send_feishu_daily.py。Weekly 独立放在 data/issues/<date>-weekly，不覆盖 Daily；完整任务配置见 config/hermes/content-weekly.prompt.md。
 - Weekly 设置 edition=weekly，并使用有主视觉的 cover 首卡；逐页声明版式。atlas/maps/process/data/source 等缺少 visual 会校验失败，纯文字页应明确 essay。data 页没设置 feature 时不保留主数字空区；刊头按 Daily / Weekly 区分。
 - 日常生产任务编辑本期稿件与素材；不能通过修改公共渲染器、校验器或 skill 迁就当前稿件。发现工具缺陷保留页面与报错，另行修复并回归验证。
+
+2026-11-11：内容决定页面构图。
+
+- 新稿 design.planning_version=1，逐页声明 layout、variant、intent、rationale；页码不固定栏目，按真实论证与素材分页。构图选项与近期对照流程见 pipeline/core/EDITORIAL_DESIGN.md。
+- 同角色可选不同构图；机制图明确语义与 visual.layout，禁止将“两套坐标”的关系示意套在无关流程上。
+- 生产前后运行 python3 -m pipeline.core.layout_plan，复核近三期与相邻同构；允许内容相似时沿用，禁止以机械轮换、换色或无关配图充当设计。发送器只在整期投递成功后记录编排历史。

@@ -110,6 +110,31 @@ class DailyRecoveryTest(unittest.TestCase):
                 self.assertEqual(len(receipts), 1)
                 self.assertEqual(set(json.loads(receipts[0].read_text())['sent']), {'img1', 'text'})
 
+    def test_layout_history_is_written_only_after_complete_delivery(self):
+        report = {'date': '2026-11-11', 'cover': {'title_lines': ['测试']},
+                  'cards': [{'title': '测试', 'points': ['事实。']}], 'references': []}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            argv = ['sender', '--report', str(root/'report.json'), '--image-dir', str(root/'images')]
+            with patch('scripts.send_feishu_daily.ROOT', root), \
+                 patch('scripts.send_feishu_daily.prepare', return_value=(report, 'abcdef', ['cover.png'])), \
+                 patch('scripts.send_feishu_daily.archive_plan') as archive, \
+                 patch('scripts.send_feishu_daily.send', return_value='sent') as deliver:
+                with patch('sys.argv', argv+['--dry-run']):
+                    main()
+                archive.assert_not_called()
+                deliver.assert_not_called()
+                with patch('sys.argv', argv+['--images-only']):
+                    main()
+                archive.assert_not_called()
+                with patch('sys.argv', argv), patch('scripts.send_feishu_daily.send', side_effect=RuntimeError('failure')):
+                    with self.assertRaises(RuntimeError):
+                        main()
+                archive.assert_not_called()
+                with patch('sys.argv', argv):
+                    main()
+                archive.assert_called_once_with(report, 'abcdef', root/'data/layout-history')
+
 
 if __name__ == '__main__':
     unittest.main()

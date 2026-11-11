@@ -100,3 +100,7 @@ atlas/maps/process/data/source 等图文页必须有对应 visual；纯文字页
 周报独立输出至 `data/issues/<date>-weekly/`，发送用上述 --report / --image-dir，不调用固定12页的旧脚本。
 
 """
+
+### 内容编排与跨期对照
+
+新稿使用 `design.planning_version: 1`，每卡声明 `design.layout/variant/intent/rationale`。支持的组合来自 `editorial_variants.json`，语义与用法见 `EDITORIAL_DESIGN.md`。`python3 -m pipeline.core.layout_plan --recent daily`（或 weekly）查看近期编排；`python3 -m pipeline.core.layout_plan <report>` 校验计划并提示相邻、跨期同构。提示用于编辑判断，不按日期或页码轮换。整期发送成功后自动记录不含投递目标的布局历史，预览和部分发送不冒充已发期号。

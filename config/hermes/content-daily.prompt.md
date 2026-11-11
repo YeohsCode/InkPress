@@ -1,4 +1,4 @@
-执行 Daily AI News（2026-11-06 图文编辑规范）。在任务 workdir 中操作，使用 content-curation skill；以下新规则覆盖旧 skill 中冲突的固定模板与配图要求。
+执行 Daily AI News（2026-11-11 内容编排规范）。在任务 workdir 中操作，使用 content-curation skill；以下新规则覆盖旧 skill 中冲突的固定模板与配图要求。
 
 1. 选题与回源
 运行 python3 -m pipeline.core.digest --mode daily。读取 EDITORIAL_RULES.md、pipeline/core/EDITORIAL_DESIGN.md、pipeline/core/README_render.md 及 data/daily.json，挑一个值得深写的事件。先读当前 data/report.json，避免重复选题，再回源核对原始报道、论文或节目转录。RSS 与搜索摘要只能作线索。写明真实发布日期，旧论文不能写成当天新闻；人名、数字、单位与比较条件逐项核对。不得虚构现场、引语或实验细节。不刻意添加国内关联。
@@ -6,7 +6,7 @@
 2. 先写文章，再分页面
 先写出一篇连续、通俗、读得通的报道，沿事实、背景、案例、机制、证据与争议推进。编辑分两遍：先核事实和论证，再通读主语、指代、转折、句子节奏与比喻。用具体名词和动词解释概念，一个主要比喻足够；删掉自我解释和空泛口号。禁词命中时重写整个句群，不能只换同义词。评分仅供内部编辑，不能替代通读，也不在正文后贴自评分。
 禁止恢复「跟你有什么关系」「接下来干什么」及其换名或改写形式，包括「对你有什么影响」「下一步」「行动建议」。结尾继续讲事件，不喊话、不布置验证任务，不靠固定栏目凑页数。
-写入 data/report.json，包含 date、theme、cover、cards、references、tags。通常9页，封面与首卡合一；按实际内容分页，不能为页数注水。每条 references 带真实原文链接；标题数字与正文一致。每页 points 是完整段落，段数按论证决定。
+写入 data/report.json，包含 date、theme、cover、cards、references、tags。封面与首卡合一；按实际内容分页，不能为页数注水。每条 references 带真实原文链接；标题数字与正文一致。每页 points 是完整段落，段数按论证决定。
 
 3. 图片选择与出处
 取消配图配额不等于省掉图片。为选题寻找承担叙事、解释或气氛的主视觉和内页配图；允许有意的纯文字页，禁止无图空栏和全套文字框冒充配图。
@@ -27,3 +27,6 @@
 执行故障处理：网页工具以当前已注册能力为准；正文抽取失败时可在 terminal 用 curl -fsSL --max-time 45 保存原文，Jina Reader 作备选。浏览器端口拒绝连接后不要反复重试。未读到原文不得编写确定事实。最终状态以磁盘成品、退出码和实际回执为准。
 
 Daily 与 Weekly 的共同执行约束（2026-11-09）：日常生产仅编辑本期稿件和素材，不为迁就稿件而修改公共渲染器、校验器或 content-curation skill。缺陷须记录具体页面与报错。atlas/maps/process/data/source 等图文版式必须有对应 visual；纯文字页明确 essay，不能保留空栏。Weekly 的稿件和图片已独立存放，Daily 保持当前默认路径。
+
+
+内容编排更新（2026-11-11）：执行前运行 python3 -m pipeline.core.layout_plan --recent daily，读取当前稿与近三期同刊页面计划。先写连续文章，按本期论点分页，再设 design.planning_version=1；每页 design 必须填写 layout、variant、intent、rationale，具体选择遵照 pipeline/core/EDITORIAL_DESIGN.md 的构图表。页码不绑定内容类型，不默认 p4/p5 为数字/流程，不默认9页、每页3段。data 有 standard/ledger，process 有 standard/rail，essay 有 standard/plain/columns，cover 有 standard/framed，plate 有 standard/inset，atlas 有 standard/wide，其余 standard。variant 决定真实构图，不只换色。机制图明确 visual.layout；只有真实先后过程用 flow，不把通用 maps 的“两套坐标”画法复用到无关机制。process:rail 配 flow。完成页面计划后运行 python3 -m pipeline.core.layout_plan <report路径>，逐条复核 REVIEW 的同构和跨期重复，在 rationale 里说明本页材料为何需要这个构图；不是强制轮换，也不为变样而补图。检查整套节奏后再校验、渲染、目视验收和投递。完整成功投递自动保存本期编排历史，预览不记为送达。
